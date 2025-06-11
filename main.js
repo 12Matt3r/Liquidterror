@@ -2,6 +2,16 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { FPSControls } from './FPSControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js';
+
+// Near other global declarations like scene, camera, renderer
+let waterMesh;
+let waterNormalTexture;
+let composer;
+let hidingSpots = [];
 
 //================================================================
 // Scene Setup - Ensure Basic Functionality First
@@ -17,7 +27,7 @@ const renderer = new THREE.WebGLRenderer({
 
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.6;
@@ -28,6 +38,16 @@ if (container) {
 } else {
     document.body.appendChild(renderer.domElement);
 }
+
+// Post-processing Composer Setup
+composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const vignettePass = new ShaderPass(VignetteShader);
+// vignettePass.uniforms['offset'].value = 0.95; // Optional: Adjust vignette intensity
+// vignettePass.uniforms['darkness'].value = 1.5;  // Optional: Adjust vignette darkness
+composer.addPass(vignettePass);
 
 // Initialize camera position
 camera.position.set(37, 6, 11);
@@ -43,8 +63,8 @@ scene.add(ambientLight);
 const directionalLight = new THREE.DirectionalLight(0xffffff, 1.8);
 directionalLight.position.set(10, 20, 10);
 directionalLight.castShadow = true;
-directionalLight.shadow.mapSize.width = 2048;
-directionalLight.shadow.mapSize.height = 2048;
+directionalLight.shadow.mapSize.width = 1024;
+directionalLight.shadow.mapSize.height = 1024;
 scene.add(directionalLight);
 
 // Additional point lights for better illumination
@@ -115,6 +135,76 @@ try {
     scene.add(basicControls.getObject());
     document.addEventListener('click', () => basicControls.lock());
     controls = { pointerLockControls: basicControls, update: () => {} };
+}
+
+//================================================================
+// Water Plane
+//================================================================
+function initWater() {
+    const waterGeometry = new THREE.PlaneGeometry(200, 200); // Large plane
+
+    // Attempt to load a water normal map
+    const textureLoader = new THREE.TextureLoader();
+    waterNormalTexture = textureLoader.load(
+        '/images/texture/water_normals.jpg', // Assumed path for a water normal texture
+        (texture) => {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(5, 5); // How many times the texture repeats
+            if (waterMesh) {
+                waterMesh.material.normalMap = texture;
+                waterMesh.material.normalScale = new THREE.Vector2(0.3, 0.3); // Example normal scale
+                waterMesh.material.needsUpdate = true;
+            }
+        },
+        undefined,
+        (error) => {
+            console.warn('Water normal texture not found at /images/texture/water_normals.jpg. Using flat water material.');
+            // No need to do anything else, material will just not have a normal map
+        }
+    );
+
+    const waterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x006699, // Bluish water color
+        opacity: 0.75,
+        transparent: true,
+        metalness: 0.2,
+        roughness: 0.1,
+        // normalMap will be set above if texture loads
+    });
+
+    waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+    waterMesh.rotation.x = -Math.PI / 2; // Lay it flat
+    waterMesh.position.y = gameState.floodLevel; // Initial position
+    scene.add(waterMesh);
+}
+
+//================================================================
+// Hiding Spots
+//================================================================
+function initHidingSpots() {
+    // Example Spot 1: Could be under a large desk or in a dark corner
+    const spot1Min = new THREE.Vector3(35, 0, 5); // Assuming player height is around 2-3 units
+    const spot1Max = new THREE.Vector3(38, 3, 8); // Approx 3x3x3 box
+    const hidingSpot1 = new THREE.Box3(spot1Min, spot1Max);
+    hidingSpots.push(hidingSpot1);
+
+    // Example Spot 2: Another area, perhaps a cubicle corner
+    const spot2Min = new THREE.Vector3(-10, 0, -15);
+    const spot2Max = new THREE.Vector3(-12, 3, -12);
+    const hidingSpot2 = new THREE.Box3(spot2Min, spot2Max);
+    hidingSpots.push(hidingSpot2);
+
+    // Make hidingSpots globally accessible
+    window.hidingSpots = hidingSpots;
+
+    // For debugging, you can visualize these boxes (optional, but good for development)
+    /*
+    hidingSpots.forEach(spot => {
+        const helper = new THREE.Box3Helper(spot, 0xffff00); // Yellow color
+        scene.add(helper);
+    });
+    */
 }
 
 //================================================================
@@ -312,16 +402,20 @@ class BasicZombieAI {
             const zombiePosition = this.zombie.position;
             const distanceToPlayer = playerPosition.distanceTo(zombiePosition);
 
-            // Stealth mechanics
-            const playerIsSneaking = this.fpsControls && this.fpsControls.movementSpeed < 1.0; // Threshold for sneaking
-            const currentDetectionRange = playerIsSneaking ? this.detectionRange / 2 : this.detectionRange;
-            // For debugging, you could add:
-            // if (playerIsSneaking) console.log("Player is sneaking, detection range: ", currentDetectionRange);
+            if (this.fpsControls && this.fpsControls.isHiding) {
+                // Player is hiding. Zombie doesn't detect.
+                // (Future enhancement: zombie could still detect if it enters the same hiding spot)
+            } else {
+                // Stealth mechanics
+                const playerIsSneaking = this.fpsControls && this.fpsControls.movementSpeed < 1.0; // Threshold for sneaking
+                const currentDetectionRange = playerIsSneaking ? this.detectionRange / 2 : this.detectionRange;
+                // For debugging, you could add:
+                // if (playerIsSneaking) console.log("Player is sneaking, detection range: ", currentDetectionRange);
 
-            if (distanceToPlayer < currentDetectionRange) { // Use currentDetectionRange
-                const direction = new THREE.Vector3();
-                direction.subVectors(playerPosition, zombiePosition).normalize();
-                zombiePosition.addScaledVector(direction, this.speed);
+                if (distanceToPlayer < currentDetectionRange) { // Use currentDetectionRange
+                    const direction = new THREE.Vector3();
+                    direction.subVectors(playerPosition, zombiePosition).normalize();
+                    zombiePosition.addScaledVector(direction, this.speed);
                 this.zombie.lookAt(playerPosition);
 
                 if (distanceToPlayer < this.attackRange) {
@@ -685,6 +779,15 @@ function animate() {
         animationId = requestAnimationFrame(animate);
         
         const delta = clock.getDelta();
+
+        // Update water mesh
+        if (waterMesh) {
+            waterMesh.position.y = gameState.floodLevel;
+            if (waterMesh.material.normalMap) {
+                waterMesh.material.normalMap.offset.x += 0.001;
+                waterMesh.material.normalMap.offset.y += 0.0005;
+            }
+        }
         
         // Animate test cubes to show the scene is working
         testCube1.rotation.y += delta;
@@ -727,8 +830,9 @@ function animate() {
             return;
         }
         
-        // Render the scene
-        renderer.render(scene, camera);
+        // Render the scene using the composer
+        // renderer.render(scene, camera); // Old line
+        composer.render(); // New line for post-processing
         
     } catch (error) {
         console.error('Error in animation loop:', error);
@@ -742,6 +846,8 @@ function animate() {
 //================================================================
 // Start the basic game immediately
 console.log('Initializing basic game...');
+initWater(); // Call the function to create the water
+initHidingSpots(); // Call to initialize hiding spots
 animate();
 
 // Load additional objects after a delay
@@ -755,6 +861,7 @@ window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight); // Add this line
 });
 
 // Add CSS animations

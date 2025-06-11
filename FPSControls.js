@@ -47,6 +47,7 @@ export class FPSControls {
     
     // Initialize UI elements
     this.initUIElements();
+    this.isHiding = false;
   }
 
   initAudioSources() {
@@ -285,6 +286,19 @@ export class FPSControls {
     
     // Update target marker animation
     this.updateTargetMarker();
+
+    // Update hiding status
+    this.isHiding = false; // Reset before checking
+    if (window.hidingSpots && Array.isArray(window.hidingSpots)) {
+        for (const spot of window.hidingSpots) {
+            if (spot.containsPoint(this.camera.position)) {
+                this.isHiding = true;
+                break;
+            }
+        }
+    }
+    // For debugging:
+    // if (this.isHiding) console.log("Player is hiding!");
   }
 
   updateMovementTracking(delta) {
