@@ -525,6 +525,7 @@ export class FPSControls {
   }
 
   gameFinished() {
+    if (window.gameState) window.gameState.currentState = 'victory';
     // Create a black screen that will fade in
     const whiteScreen = document.createElement('div');
     whiteScreen.style.position = 'absolute';

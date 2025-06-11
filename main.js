@@ -128,8 +128,9 @@ class GameStateManager {
         this.hasKey = false;
         this.objectives = {
             findKey: false,
-            reachExit: false,
-            surviveFlood: false
+            reachExit: false, // This might become redundant or re-purposed
+            surviveFlood: false,
+            doorUnlocked: false // New flag
         };
         this.floodLevel = 0;
         this.maxFloodLevel = 15;
@@ -255,9 +256,10 @@ const particleSystem = new BasicParticleSystem(scene);
 // Basic Zombie AI
 //================================================================
 class BasicZombieAI {
-    constructor(scene, camera) {
+    constructor(scene, camera, fpsControls) { // Added fpsControls
         this.scene = scene;
         this.camera = camera;
+        this.fpsControls = fpsControls; // Store it
         this.zombie = null;
         this.state = 'patrol';
         this.speed = 0.02;
@@ -310,7 +312,13 @@ class BasicZombieAI {
             const zombiePosition = this.zombie.position;
             const distanceToPlayer = playerPosition.distanceTo(zombiePosition);
 
-            if (distanceToPlayer < this.detectionRange) {
+            // Stealth mechanics
+            const playerIsSneaking = this.fpsControls && this.fpsControls.movementSpeed < 1.0; // Threshold for sneaking
+            const currentDetectionRange = playerIsSneaking ? this.detectionRange / 2 : this.detectionRange;
+            // For debugging, you could add:
+            // if (playerIsSneaking) console.log("Player is sneaking, detection range: ", currentDetectionRange);
+
+            if (distanceToPlayer < currentDetectionRange) { // Use currentDetectionRange
                 const direction = new THREE.Vector3();
                 direction.subVectors(playerPosition, zombiePosition).normalize();
                 zombiePosition.addScaledVector(direction, this.speed);
@@ -346,7 +354,7 @@ class BasicZombieAI {
 
 let zombieAI;
 try {
-    zombieAI = new BasicZombieAI(scene, camera);
+    zombieAI = new BasicZombieAI(scene, camera, controls); // Pass controls
 } catch (error) {
     console.warn('Failed to initialize zombie AI:', error);
 }
@@ -502,14 +510,12 @@ class BasicInteractionSystem {
             if (this.gameState.hasKey) {
                 doorObj.userData.locked = false;
                 this.animateDoorOpen(doorObj);
-            }
-        } else {
-            const exitPoint = new THREE.Vector3(-61, 4, -40);
-            if (this.camera.position.distanceTo(exitPoint) < 8) {
-                this.gameState.objectives.reachExit = true;
-                this.gameState.currentState = 'victory';
+                this.gameState.objectives.doorUnlocked = true;
             }
         }
+        // Removed the else block that previously handled victory condition
+        // when door was already open and player was near exit.
+        // This logic is now in FPSControls.js
     }
 
     animateDoorOpen(doorObj) {
@@ -570,8 +576,14 @@ function loadGameObjects() {
 
     // Try to load objects, but don't fail if modules don't exist
     Promise.all([
-        import('./objects.js').catch(() => null),
-        import('./effects.js').catch(() => null),
+        import('./objects.js').catch(error => {
+            console.warn('Failed to import objects.js:', error); // Keep console warning
+            if (controls && typeof controls.showNotification === 'function') {
+                controls.showNotification('Warning: Critical game objects failed to load. Gameplay might be affected.', 'warning');
+            }
+            return null; // Still return null so Promise.all doesn't break
+        }),
+        import('./effects.js').catch(() => null), // Keep others as they are for now
         import('./design.js').catch(() => null)
     ]).then(([objects, effects, design]) => {
         if (objects) {
@@ -612,30 +624,30 @@ function loadGameObjects() {
 //================================================================
 // Victory/Game Over Screens
 //================================================================
-function showVictoryScreen() {
-    const victoryScreen = document.createElement('div');
-    victoryScreen.innerHTML = `
-        <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                   background: linear-gradient(45deg, rgba(46, 213, 115, 0.9), rgba(0, 123, 255, 0.9));
-                   display: flex; flex-direction: column; justify-content: center; align-items: center;
-                   color: white; font-family: 'Segoe UI', sans-serif; z-index: 9999;
-                   animation: fadeIn 2s ease-out;">
-            <h1 style="font-size: 4rem; margin-bottom: 1rem; text-shadow: 0 4px 8px rgba(0,0,0,0.5);">
-                ESCAPED!
-            </h1>
-            <p style="font-size: 1.5rem; margin-bottom: 2rem; text-align: center;">
-                You survived the flood and escaped the nightmare!
-            </p>
-            <button onclick="window.location.reload()" 
-                   style="padding: 15px 30px; font-size: 1.2rem; background: rgba(255,255,255,0.2);
-                          border: 2px solid white; color: white; border-radius: 10px; cursor: pointer;
-                          transition: all 0.3s ease;">
-                Play Again
-            </button>
-        </div>
-    `;
-    document.body.appendChild(victoryScreen);
-}
+// function showVictoryScreen() { // REMOVED
+//     const victoryScreen = document.createElement('div');
+//     victoryScreen.innerHTML = `
+//         <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+//                    background: linear-gradient(45deg, rgba(46, 213, 115, 0.9), rgba(0, 123, 255, 0.9));
+//                    display: flex; flex-direction: column; justify-content: center; align-items: center;
+//                    color: white; font-family: 'Segoe UI', sans-serif; z-index: 9999;
+//                    animation: fadeIn 2s ease-out;">
+//             <h1 style="font-size: 4rem; margin-bottom: 1rem; text-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+//                 ESCAPED!
+//             </h1>
+//             <p style="font-size: 1.5rem; margin-bottom: 2rem; text-align: center;">
+//                 You survived the flood and escaped the nightmare!
+//             </p>
+//             <button onclick="window.location.reload()"
+//                    style="padding: 15px 30px; font-size: 1.2rem; background: rgba(255,255,255,0.2);
+//                           border: 2px solid white; color: white; border-radius: 10px; cursor: pointer;
+//                           transition: all 0.3s ease;">
+//                 Play Again
+//             </button>
+//         </div>
+//     `;
+//     document.body.appendChild(victoryScreen);
+// }
 
 function showGameOverScreen() {
     const gameOverScreen = document.createElement('div');
@@ -707,7 +719,7 @@ function animate() {
         // Check win/lose conditions
         if (gameState.currentState === 'victory') {
             cancelAnimationFrame(animationId);
-            showVictoryScreen();
+            // showVictoryScreen(); // Removed
             return;
         } else if (gameState.currentState === 'gameOver') {
             cancelAnimationFrame(animationId);
