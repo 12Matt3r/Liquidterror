@@ -122,6 +122,18 @@ export class FPSControls {
             console.warn('Failed to load heartbeatSound "heartbeat.mp3":', error);
         }
     );
+
+    this.objectImpactSound = new THREE.Audio(this.listener);
+    audioLoader.load('sounds/object_impact.mp3', // Assumed path
+        (buffer) => {
+            this.objectImpactSound.setBuffer(buffer);
+            this.objectImpactSound.setVolume(0.5); // Adjust volume as needed
+        },
+        undefined, // onProgress
+        (error) => {
+            console.warn('Failed to load objectImpactSound "sounds/object_impact.mp3":', error);
+        }
+    );
   }
 
   initUIElements() {
@@ -572,6 +584,16 @@ export class FPSControls {
             console.warn('Failed to load jumpSound "jump.mp3":', error);
         }
     );
+  }
+
+  playObjectImpactSound() {
+    if (this.objectImpactSound && this.objectImpactSound.buffer) { // .buffer is a better check than .isLoaded
+        // If it's already playing, stop it and replay for immediate feedback
+        if (this.objectImpactSound.isPlaying) {
+            this.objectImpactSound.stop();
+        }
+        this.objectImpactSound.play();
+    }
   }
 
   gameFinished() {

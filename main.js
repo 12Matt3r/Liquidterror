@@ -56,11 +56,11 @@ camera.position.set(37, 6, 11);
 // Basic Lighting Setup - Essential for Visibility
 //================================================================
 // Strong ambient light to ensure visibility
-const ambientLight = new THREE.AmbientLight(0x404040, 1.2);
+const ambientLight = new THREE.AmbientLight(0x404040, 0.7); // New intensity
 scene.add(ambientLight);
 
 // Main directional light
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1.8);
+const directionalLight = new THREE.DirectionalLight(0xEEF2FF, 1.4); // New color and intensity
 directionalLight.position.set(10, 20, 10);
 directionalLight.castShadow = true;
 directionalLight.shadow.mapSize.width = 1024;
@@ -68,11 +68,11 @@ directionalLight.shadow.mapSize.height = 1024;
 scene.add(directionalLight);
 
 // Additional point lights for better illumination
-const pointLight1 = new THREE.PointLight(0xffffff, 1, 50);
+const pointLight1 = new THREE.PointLight(0xffffff, 0.6, 50); // New intensity
 pointLight1.position.set(20, 15, 20);
 scene.add(pointLight1);
 
-const pointLight2 = new THREE.PointLight(0xffffff, 0.8, 40);
+const pointLight2 = new THREE.PointLight(0xffffff, 0.4, 40); // New intensity
 pointLight2.position.set(-20, 12, -20);
 scene.add(pointLight2);
 
@@ -691,9 +691,11 @@ class BasicInteractionSystem {
     updateInteractionUI(obj) {
         const keyNote = document.getElementById('key-collect-note');
         const doorNote = document.getElementById('door-open-note');
+        const nudgeNote = document.getElementById('nudge-note'); // New
         
         if (keyNote) keyNote.style.display = 'none';
         if (doorNote) doorNote.style.display = 'none';
+        if (nudgeNote) nudgeNote.style.display = 'none'; // New
 
         if (obj) {
             if (obj.userData.type === 'key' && !obj.userData.collected && keyNote) {
@@ -703,20 +705,42 @@ class BasicInteractionSystem {
                 doorNote.textContent = obj.userData.locked ? 
                     (this.gameState.hasKey ? 'Press E to unlock door' : 'Door is locked - find the key') :
                     'Press E to open door';
+            } else if (obj.userData.isNudgable && nudgeNote) { // New condition
+                nudgeNote.style.display = 'block';
             }
         }
     }
 
     attemptInteraction() {
         if (!this.currentFocused) return;
-
         const obj = this.currentFocused;
         
         if (obj.userData.type === 'key' && !obj.userData.collected) {
             this.collectKey(obj);
         } else if (obj.userData.type === 'door') {
             this.interactWithDoor(obj);
+        } else if (obj.userData.isNudgable) { // Added this condition
+            this.nudgeObject(obj);
         }
+    }
+
+    nudgeObject(object) {
+        if (!object) return;
+
+        const nudgeDirection = object.userData.lastNudgeSign || 1;
+        object.rotation.z += (Math.PI / 16) * nudgeDirection;
+        // Apply a small positional nudge as well, perhaps along its local X or a world X
+        // For simplicity, let's use world X for now.
+        object.position.x += 0.2 * nudgeDirection;
+
+        object.userData.lastNudgeSign = -nudgeDirection;
+
+        // Play sound
+        if (controls && typeof controls.playObjectImpactSound === 'function') {
+            controls.playObjectImpactSound();
+        }
+
+        // console.log(`Nudged ${object.userData.type}`);
     }
 
     collectKey(keyObj) {
@@ -817,23 +841,64 @@ function loadGameObjects() {
         import('./design.js').catch(() => null)
     ]).then(([objects, effects, design]) => {
         if (objects) {
-            loadObject(objects.createChair, 'Chair');
-            loadObject(objects.createdesk, 'Desk');
-            loadObject(objects.createaircon, 'Air Conditioner');
-            loadObject(objects.createflower, 'Flower');
-            loadObject(objects.createframe, 'Frame');
-            loadObject(objects.createdispenser, 'Dispenser');
-            loadObject(objects.created_design1, 'Design 1');
-            loadObject(objects.created_design2, 'Design 2');
-            loadObject(objects.created_design3, 'Design 3');
-            loadObject(objects.created_floor, 'Floor');
-            loadObject(objects.created_hallchairs, 'Hall Chairs');
-            loadObject(objects.created_cheaproom, 'Cheap Room');
-            loadObject(objects.created_fence, 'Fence');
-            loadObject(objects.created_statue, 'Statue');
-            loadObject(objects.created_ceiling, 'Ceiling');
-            loadObject(objects.created_nearstatue, 'Near Statue');
-            loadObject(objects.created_fallingceiling, 'Falling Ceiling');
+            // Handle nudgable items separately
+            if (objects.createframe) {
+                objects.createframe(scene)
+                    .then(frameObj => {
+                        if (frameObj) {
+                            frameObj.userData.isNudgable = true;
+                            frameObj.userData.type = 'frame';
+                            if (interactionSystem && interactionSystem.interactables) {
+                                interactionSystem.interactables.push(frameObj);
+                            }
+                            // console.log("Frame processed for interaction");
+                        }
+                    })
+                    .catch(error => console.warn('Error processing frame for interaction:', error));
+            }
+
+            if (objects.createflower) {
+                objects.createflower(scene)
+                    .then(flowerObj => {
+                        if (flowerObj) {
+                            flowerObj.userData.isNudgable = true;
+                            flowerObj.userData.type = 'flower';
+                            if (interactionSystem && interactionSystem.interactables) {
+                                interactionSystem.interactables.push(flowerObj);
+                            }
+                            // console.log("Flower processed for interaction");
+                        }
+                    })
+                    .catch(error => console.warn('Error processing flower for interaction:', error));
+            }
+
+            // Load other objects from objects.js
+            const objectLoaders = {
+                'Chair': objects.createChair,
+                'Desk': objects.createdesk,
+                'Air Conditioner': objects.createaircon,
+                // 'Flower': objects.createflower, // Handled above
+                // 'Frame': objects.createframe,   // Handled above
+                'Dispenser': objects.createdispenser,
+                'Design 1': objects.created_design1,
+                'Design 2': objects.created_design2,
+                'Design 3': objects.created_design3,
+                'Floor': objects.created_floor,
+                'Hall Chairs': objects.created_hallchairs,
+                'Cheap Room': objects.created_cheaproom,
+                'Fence': objects.created_fence,
+                'Statue': objects.created_statue,
+                'Ceiling': objects.created_ceiling,
+                'Near Statue': objects.created_nearstatue,
+                'Falling Ceiling': objects.created_fallingceiling
+            };
+            for (const [name, loaderFunc] of Object.entries(objectLoaders)) {
+                if (loaderFunc) { // Check if loaderFunc exists
+                     loaderFunc(scene) // Assuming these also add to scene and return promise
+                        .then(obj => { /* console.log(`${name} loaded.`); */ })
+                        .catch(error => console.warn(`Error loading ${name}:`, error));
+                }
+            }
         }
         
         if (effects) {
