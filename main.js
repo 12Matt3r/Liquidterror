@@ -351,13 +351,79 @@ class BasicZombieAI {
         this.camera = camera;
         this.fpsControls = fpsControls; // Store it
         this.zombie = null;
-        this.state = 'patrol';
-        this.speed = 0.02;
-        this.detectionRange = 30;
+        this.raycaster = new THREE.Raycaster(); // From previous step
+
+        this.state = 'PATROL'; // Initial state: PATROL, CHASING, SEARCHING_LKL
+        this.speed = 0.02; // Base speed
+        this.chaseSpeed = 0.035; // Slightly faster when chasing
+        this.detectionRange = 30; // Main awareness/LOS check radius
         this.attackRange = 3;
         this.lastAttackTime = 0;
+
+        this.lastKnownPlayerPosition = null;
+        this.timeSpentSearching = 0;
+        this.searchDuration = 10; // Seconds to search at LKL
+        this.patrolWaypoints = [ // Example waypoints if we add patrolling later
+            // new THREE.Vector3(-20, 0, -20),
+            // new THREE.Vector3(20, 0, -20),
+        ];
+        this.currentWaypointIndex = 0;
         
         this.loadZombie();
+    }
+
+    hasLineOfSightToPlayer(currentEffectiveRange) { // Added currentEffectiveRange parameter
+        if (!this.zombie || !this.camera || !this.scene) return false;
+
+        const zombieEyePosition = new THREE.Vector3();
+        // Assuming this.zombie is the group/object whose position is set.
+        // The zombie's base Y is often its feet. Its height might be around 1.8 units * scale.
+        zombieEyePosition.copy(this.zombie.position);
+        const eyeHeightOffset = 1.6 * this.zombie.scale.y * 0.9; // Approx 90% of a 1.6 unit model height, scaled
+        zombieEyePosition.y += eyeHeightOffset;
+
+        const playerPosition = this.camera.position.clone();
+        const directionToPlayer = new THREE.Vector3().subVectors(playerPosition, zombieEyePosition).normalize();
+
+        this.raycaster.set(zombieEyePosition, directionToPlayer);
+        this.raycaster.near = 0.5; // Increased near to avoid hitting parts of zombie model itself easily
+        this.raycaster.far = currentEffectiveRange + 5; // Use currentEffectiveRange
+
+        const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+
+        // Filter out intersections with the zombie itself or other non-collidable objects
+        let firstValidHit = null;
+        for (const intersect of intersects) {
+            let currentObject = intersect.object;
+            let isSelf = false;
+            while (currentObject) {
+                if (currentObject === this.zombie) {
+                    isSelf = true;
+                    break;
+                }
+                // Add other potential non-collidable checks here
+                if (currentObject === waterMesh || (particleSystem && currentObject === particleSystem.particles)) {
+                    isSelf = true; // Treat as transparent for LOS
+                    break;
+                }
+                currentObject = currentObject.parent;
+            }
+            if (!isSelf) {
+                firstValidHit = intersect;
+                break;
+            }
+        }
+
+        if (firstValidHit) {
+            const distanceToPlayerActual = zombieEyePosition.distanceTo(playerPosition);
+            if (firstValidHit.distance > distanceToPlayerActual - 0.5) {
+                return true;
+            }
+            // Optional: console.log("LOS blocked by:", firstValidHit.object.name || firstValidHit.object.uuid, "at distance", firstValidHit.distance, "player at", distanceToPlayerActual);
+            return false;
+        }
+
+        return true;
     }
 
     loadZombie() {
@@ -395,44 +461,114 @@ class BasicZombieAI {
     }
 
     update(delta) {
-        if (!this.zombie) return;
+        if (!this.zombie || !this.camera || !this.fpsControls) return;
 
-        try {
-            const playerPosition = this.camera.position;
-            const zombiePosition = this.zombie.position;
-            const distanceToPlayer = playerPosition.distanceTo(zombiePosition);
+        const playerPosition = this.camera.position;
+        const zombiePosition = this.zombie.position;
+        const distanceToPlayer = playerPosition.distanceTo(zombiePosition);
 
-            if (this.fpsControls && this.fpsControls.isHiding) {
-                // Player is hiding. Zombie doesn't detect.
-                // (Future enhancement: zombie could still detect if it enters the same hiding spot)
-            } else {
-                // Stealth mechanics
-                const playerIsSneaking = this.fpsControls && this.fpsControls.movementSpeed < 1.0; // Threshold for sneaking
-                const currentDetectionRange = playerIsSneaking ? this.detectionRange / 2 : this.detectionRange;
-                // For debugging, you could add:
-                // if (playerIsSneaking) console.log("Player is sneaking, detection range: ", currentDetectionRange);
+        const playerIsHiding = this.fpsControls && this.fpsControls.isHiding;
+        if (playerIsHiding) { // If player is hiding, AI behavior is simplified
+            if (this.state === 'CHASING' || this.state === 'SEARCHING_LKL') {
+                this.state = 'PATROL';
+                this.lastKnownPlayerPosition = null;
+                // console.log("Zombie: Player hid, returning to PATROL");
+            }
+        }
 
-                if (distanceToPlayer < currentDetectionRange) { // Use currentDetectionRange
-                    const direction = new THREE.Vector3();
-                    direction.subVectors(playerPosition, zombiePosition).normalize();
-                    zombiePosition.addScaledVector(direction, this.speed);
-                this.zombie.lookAt(playerPosition);
+        const playerIsSneaking = this.fpsControls && !playerIsHiding && this.fpsControls.movementSpeed < 1.0;
+        const effectiveDetectionRange = playerIsSneaking ? this.detectionRange / 2 : this.detectionRange;
 
-                if (distanceToPlayer < this.attackRange) {
-                    const currentTime = Date.now();
-                    if (currentTime - this.lastAttackTime > 2000) {
-                        this.lastAttackTime = currentTime;
-                        gameState.takeDamage(15);
-                        this.triggerDamageEffect();
+        // Check LOS using the effectiveDetectionRange
+        const inLOS = !playerIsHiding && this.hasLineOfSightToPlayer(effectiveDetectionRange);
+
+        // --- State Machine ---
+        switch (this.state) {
+            case 'PATROL':
+                // Placeholder for actual patrol logic (e.g., move between waypoints)
+                // For now, just stand and look around or idle.
+                // Periodically check for player
+                if (distanceToPlayer < effectiveDetectionRange && inLOS) {
+                    this.state = 'CHASING';
+                    // console.log("Zombie: PATROL -> CHASING");
+                }
+                break;
+
+            case 'CHASING':
+                // playerIsHiding check now at the top of update()
+                if (inLOS && distanceToPlayer < this.detectionRange + 10) { // +10 chase persistence range
+                    this.lastKnownPlayerPosition = playerPosition.clone(); // Keep updating LKL while chasing with LOS
+
+                    const direction = new THREE.Vector3().subVectors(playerPosition, zombiePosition).normalize();
+                    zombiePosition.addScaledVector(direction, this.chaseSpeed); // Use chaseSpeed
+                    this.zombie.lookAt(playerPosition);
+
+                    if (distanceToPlayer < this.attackRange) {
+                        const currentTime = Date.now();
+                        if (currentTime - this.lastAttackTime > 2000) {
+                            this.lastAttackTime = currentTime;
+                            gameState.takeDamage(15);
+                            this.triggerDamageEffect();
+                            // console.log("Zombie: Attacking!");
+                        }
+                    }
+                } else {
+                    // Lost LOS or player is too far, but was just chasing
+                    if (this.lastKnownPlayerPosition) { // Should always have LKL if was chasing
+                        this.state = 'SEARCHING_LKL';
+                        this.timeSpentSearching = 0;
+                        // console.log("Zombie: CHASING -> SEARCHING_LKL at", this.lastKnownPlayerPosition);
+                    } else {
+                        this.state = 'PATROL'; // Should not happen if LKL was updated, but as a fallback
+                        // console.log("Zombie: CHASING -> PATROL (lost player, no LKL)");
                     }
                 }
-            }
+                break;
 
-            // Simple floating animation
-            zombiePosition.y = 2 + Math.sin(Date.now() * 0.002) * 0.3;
-        } catch (error) {
-            console.warn('Error updating zombie:', error);
+            case 'SEARCHING_LKL':
+                if (this.fpsControls.isHiding) {
+                    this.state = 'PATROL';
+                    this.lastKnownPlayerPosition = null;
+                    // console.log("Zombie: SEARCHING_LKL -> PATROL (player hid)");
+                    break;
+                }
+
+                // Try to re-acquire target
+                if (distanceToPlayer < this.detectionRange && inLOS) {
+                    this.state = 'CHASING';
+                    this.lastKnownPlayerPosition = null; // Clear LKL as target re-acquired
+                    // console.log("Zombie: SEARCHING_LKL -> CHASING (player re-acquired)");
+                    break;
+                }
+
+                if (this.lastKnownPlayerPosition) {
+                    const distanceToLKL = zombiePosition.distanceTo(this.lastKnownPlayerPosition);
+                    if (distanceToLKL > 1.0) { // Tolerance for reaching LKL
+                        const direction = new THREE.Vector3().subVectors(this.lastKnownPlayerPosition, zombiePosition).normalize();
+                        zombiePosition.addScaledVector(direction, this.speed); // Move at normal speed to LKL
+                        this.zombie.lookAt(this.lastKnownPlayerPosition);
+                    } else {
+                        // Arrived at LKL, now "search" (pause/wait)
+                        this.lastKnownPlayerPosition = null; // Indicate arrival and start "looking around" phase
+                        // console.log("Zombie: Arrived at LKL, now searching area.");
+                    }
+                } else {
+                    // At LKL (or no LKL was set), "look around" by waiting
+                    this.timeSpentSearching += delta;
+                    if (this.timeSpentSearching > this.searchDuration) {
+                        this.state = 'PATROL';
+                        this.timeSpentSearching = 0;
+                        // console.log("Zombie: SEARCHING_LKL -> PATROL (search time expired)");
+                    }
+                }
+                break;
         }
+
+        // Common logic (like floating animation) - keep outside the state machine if it always applies
+        if (this.state !== 'CHASING') { // Don't float if chasing, allow more grounded movement
+             zombiePosition.y = 2 + Math.sin(Date.now() * 0.002) * 0.3;
+        }
+
     }
 
     triggerDamageEffect() {
