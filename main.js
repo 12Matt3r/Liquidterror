@@ -2,6 +2,16 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { FPSControls } from './FPSControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js';
+
+// Near other global declarations like scene, camera, renderer
+let waterMesh;
+let waterNormalTexture;
+let composer;
+let hidingSpots = [];
 
 //================================================================
 // Scene Setup - Ensure Basic Functionality First
@@ -17,7 +27,7 @@ const renderer = new THREE.WebGLRenderer({
 
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.6;
@@ -28,6 +38,16 @@ if (container) {
 } else {
     document.body.appendChild(renderer.domElement);
 }
+
+// Post-processing Composer Setup
+composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const vignettePass = new ShaderPass(VignetteShader);
+// vignettePass.uniforms['offset'].value = 0.95; // Optional: Adjust vignette intensity
+// vignettePass.uniforms['darkness'].value = 1.5;  // Optional: Adjust vignette darkness
+composer.addPass(vignettePass);
 
 // Initialize camera position
 camera.position.set(37, 6, 11);
@@ -43,8 +63,8 @@ scene.add(ambientLight);
 const directionalLight = new THREE.DirectionalLight(0xffffff, 1.8);
 directionalLight.position.set(10, 20, 10);
 directionalLight.castShadow = true;
-directionalLight.shadow.mapSize.width = 2048;
-directionalLight.shadow.mapSize.height = 2048;
+directionalLight.shadow.mapSize.width = 1024;
+directionalLight.shadow.mapSize.height = 1024;
 scene.add(directionalLight);
 
 // Additional point lights for better illumination
@@ -118,6 +138,76 @@ try {
 }
 
 //================================================================
+// Water Plane
+//================================================================
+function initWater() {
+    const waterGeometry = new THREE.PlaneGeometry(200, 200); // Large plane
+
+    // Attempt to load a water normal map
+    const textureLoader = new THREE.TextureLoader();
+    waterNormalTexture = textureLoader.load(
+        '/images/texture/water_normals.jpg', // Assumed path for a water normal texture
+        (texture) => {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(5, 5); // How many times the texture repeats
+            if (waterMesh) {
+                waterMesh.material.normalMap = texture;
+                waterMesh.material.normalScale = new THREE.Vector2(0.3, 0.3); // Example normal scale
+                waterMesh.material.needsUpdate = true;
+            }
+        },
+        undefined,
+        (error) => {
+            console.warn('Water normal texture not found at /images/texture/water_normals.jpg. Using flat water material.');
+            // No need to do anything else, material will just not have a normal map
+        }
+    );
+
+    const waterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x006699, // Bluish water color
+        opacity: 0.75,
+        transparent: true,
+        metalness: 0.2,
+        roughness: 0.1,
+        // normalMap will be set above if texture loads
+    });
+
+    waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+    waterMesh.rotation.x = -Math.PI / 2; // Lay it flat
+    waterMesh.position.y = gameState.floodLevel; // Initial position
+    scene.add(waterMesh);
+}
+
+//================================================================
+// Hiding Spots
+//================================================================
+function initHidingSpots() {
+    // Example Spot 1: Could be under a large desk or in a dark corner
+    const spot1Min = new THREE.Vector3(35, 0, 5); // Assuming player height is around 2-3 units
+    const spot1Max = new THREE.Vector3(38, 3, 8); // Approx 3x3x3 box
+    const hidingSpot1 = new THREE.Box3(spot1Min, spot1Max);
+    hidingSpots.push(hidingSpot1);
+
+    // Example Spot 2: Another area, perhaps a cubicle corner
+    const spot2Min = new THREE.Vector3(-10, 0, -15);
+    const spot2Max = new THREE.Vector3(-12, 3, -12);
+    const hidingSpot2 = new THREE.Box3(spot2Min, spot2Max);
+    hidingSpots.push(hidingSpot2);
+
+    // Make hidingSpots globally accessible
+    window.hidingSpots = hidingSpots;
+
+    // For debugging, you can visualize these boxes (optional, but good for development)
+    /*
+    hidingSpots.forEach(spot => {
+        const helper = new THREE.Box3Helper(spot, 0xffff00); // Yellow color
+        scene.add(helper);
+    });
+    */
+}
+
+//================================================================
 // Game State Management System
 //================================================================
 class GameStateManager {
@@ -128,12 +218,13 @@ class GameStateManager {
         this.hasKey = false;
         this.objectives = {
             findKey: false,
-            reachExit: false,
-            surviveFlood: false
+            reachExit: false, // This might become redundant or re-purposed
+            surviveFlood: false,
+            doorUnlocked: false // New flag
         };
         this.floodLevel = 0;
         this.maxFloodLevel = 15;
-        this.floodSpeed = 0.002;
+        this.floodSpeed = 0.05; // Increased speed
         this.ambientIntensity = 1.0;
         this.lastHeartbeat = 0;
     }
@@ -255,9 +346,10 @@ const particleSystem = new BasicParticleSystem(scene);
 // Basic Zombie AI
 //================================================================
 class BasicZombieAI {
-    constructor(scene, camera) {
+    constructor(scene, camera, fpsControls) { // Added fpsControls
         this.scene = scene;
         this.camera = camera;
+        this.fpsControls = fpsControls; // Store it
         this.zombie = null;
         this.state = 'patrol';
         this.speed = 0.02;
@@ -310,10 +402,20 @@ class BasicZombieAI {
             const zombiePosition = this.zombie.position;
             const distanceToPlayer = playerPosition.distanceTo(zombiePosition);
 
-            if (distanceToPlayer < this.detectionRange) {
-                const direction = new THREE.Vector3();
-                direction.subVectors(playerPosition, zombiePosition).normalize();
-                zombiePosition.addScaledVector(direction, this.speed);
+            if (this.fpsControls && this.fpsControls.isHiding) {
+                // Player is hiding. Zombie doesn't detect.
+                // (Future enhancement: zombie could still detect if it enters the same hiding spot)
+            } else {
+                // Stealth mechanics
+                const playerIsSneaking = this.fpsControls && this.fpsControls.movementSpeed < 1.0; // Threshold for sneaking
+                const currentDetectionRange = playerIsSneaking ? this.detectionRange / 2 : this.detectionRange;
+                // For debugging, you could add:
+                // if (playerIsSneaking) console.log("Player is sneaking, detection range: ", currentDetectionRange);
+
+                if (distanceToPlayer < currentDetectionRange) { // Use currentDetectionRange
+                    const direction = new THREE.Vector3();
+                    direction.subVectors(playerPosition, zombiePosition).normalize();
+                    zombiePosition.addScaledVector(direction, this.speed);
                 this.zombie.lookAt(playerPosition);
 
                 if (distanceToPlayer < this.attackRange) {
@@ -346,7 +448,7 @@ class BasicZombieAI {
 
 let zombieAI;
 try {
-    zombieAI = new BasicZombieAI(scene, camera);
+    zombieAI = new BasicZombieAI(scene, camera, controls); // Pass controls
 } catch (error) {
     console.warn('Failed to initialize zombie AI:', error);
 }
@@ -502,14 +604,12 @@ class BasicInteractionSystem {
             if (this.gameState.hasKey) {
                 doorObj.userData.locked = false;
                 this.animateDoorOpen(doorObj);
-            }
-        } else {
-            const exitPoint = new THREE.Vector3(-61, 4, -40);
-            if (this.camera.position.distanceTo(exitPoint) < 8) {
-                this.gameState.objectives.reachExit = true;
-                this.gameState.currentState = 'victory';
+                this.gameState.objectives.doorUnlocked = true;
             }
         }
+        // Removed the else block that previously handled victory condition
+        // when door was already open and player was near exit.
+        // This logic is now in FPSControls.js
     }
 
     animateDoorOpen(doorObj) {
@@ -570,8 +670,14 @@ function loadGameObjects() {
 
     // Try to load objects, but don't fail if modules don't exist
     Promise.all([
-        import('./objects.js').catch(() => null),
-        import('./effects.js').catch(() => null),
+        import('./objects.js').catch(error => {
+            console.warn('Failed to import objects.js:', error); // Keep console warning
+            if (controls && typeof controls.showNotification === 'function') {
+                controls.showNotification('Warning: Critical game objects failed to load. Gameplay might be affected.', 'warning');
+            }
+            return null; // Still return null so Promise.all doesn't break
+        }),
+        import('./effects.js').catch(() => null), // Keep others as they are for now
         import('./design.js').catch(() => null)
     ]).then(([objects, effects, design]) => {
         if (objects) {
@@ -599,12 +705,11 @@ function loadGameObjects() {
         }
         
         if (design) {
-            try {
-                design.loadWall(scene, { x: 0, y: 0, z: -50 }, '/images/texture/tile.jpg');
-                design.loadWall(scene, { x: 0, y: 0, z: 50 }, '/images/texture/tile.jpg');
-            } catch (error) {
-                console.warn('Failed to load walls:', error);
-            }
+            // Removed the old try...catch block for these calls
+            design.loadWall(scene, { x: 0, y: 0, z: -50 }, '/images/texture/tile.jpg')
+                .catch(error => console.warn('Error loading wall (z: -50):', error));
+            design.loadWall(scene, { x: 0, y: 0, z: 50 }, '/images/texture/tile.jpg')
+                .catch(error => console.warn('Error loading wall (z: 50):', error));
         }
     });
 }
@@ -612,30 +717,30 @@ function loadGameObjects() {
 //================================================================
 // Victory/Game Over Screens
 //================================================================
-function showVictoryScreen() {
-    const victoryScreen = document.createElement('div');
-    victoryScreen.innerHTML = `
-        <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                   background: linear-gradient(45deg, rgba(46, 213, 115, 0.9), rgba(0, 123, 255, 0.9));
-                   display: flex; flex-direction: column; justify-content: center; align-items: center;
-                   color: white; font-family: 'Segoe UI', sans-serif; z-index: 9999;
-                   animation: fadeIn 2s ease-out;">
-            <h1 style="font-size: 4rem; margin-bottom: 1rem; text-shadow: 0 4px 8px rgba(0,0,0,0.5);">
-                ESCAPED!
-            </h1>
-            <p style="font-size: 1.5rem; margin-bottom: 2rem; text-align: center;">
-                You survived the flood and escaped the nightmare!
-            </p>
-            <button onclick="window.location.reload()" 
-                   style="padding: 15px 30px; font-size: 1.2rem; background: rgba(255,255,255,0.2);
-                          border: 2px solid white; color: white; border-radius: 10px; cursor: pointer;
-                          transition: all 0.3s ease;">
-                Play Again
-            </button>
-        </div>
-    `;
-    document.body.appendChild(victoryScreen);
-}
+// function showVictoryScreen() { // REMOVED
+//     const victoryScreen = document.createElement('div');
+//     victoryScreen.innerHTML = `
+//         <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+//                    background: linear-gradient(45deg, rgba(46, 213, 115, 0.9), rgba(0, 123, 255, 0.9));
+//                    display: flex; flex-direction: column; justify-content: center; align-items: center;
+//                    color: white; font-family: 'Segoe UI', sans-serif; z-index: 9999;
+//                    animation: fadeIn 2s ease-out;">
+//             <h1 style="font-size: 4rem; margin-bottom: 1rem; text-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+//                 ESCAPED!
+//             </h1>
+//             <p style="font-size: 1.5rem; margin-bottom: 2rem; text-align: center;">
+//                 You survived the flood and escaped the nightmare!
+//             </p>
+//             <button onclick="window.location.reload()"
+//                    style="padding: 15px 30px; font-size: 1.2rem; background: rgba(255,255,255,0.2);
+//                           border: 2px solid white; color: white; border-radius: 10px; cursor: pointer;
+//                           transition: all 0.3s ease;">
+//                 Play Again
+//             </button>
+//         </div>
+//     `;
+//     document.body.appendChild(victoryScreen);
+// }
 
 function showGameOverScreen() {
     const gameOverScreen = document.createElement('div');
@@ -673,6 +778,15 @@ function animate() {
         animationId = requestAnimationFrame(animate);
         
         const delta = clock.getDelta();
+
+        // Update water mesh
+        if (waterMesh) {
+            waterMesh.position.y = gameState.floodLevel;
+            if (waterMesh.material.normalMap) {
+                waterMesh.material.normalMap.offset.x += 0.001;
+                waterMesh.material.normalMap.offset.y += 0.0005;
+            }
+        }
         
         // Animate test cubes to show the scene is working
         testCube1.rotation.y += delta;
@@ -707,16 +821,23 @@ function animate() {
         // Check win/lose conditions
         if (gameState.currentState === 'victory') {
             cancelAnimationFrame(animationId);
-            showVictoryScreen();
+            if (controls && controls.pointerLockControls && controls.pointerLockControls.isLocked) {
+                controls.pointerLockControls.unlock();
+            }
+            // showVictoryScreen(); // Removed
             return;
         } else if (gameState.currentState === 'gameOver') {
             cancelAnimationFrame(animationId);
+            if (controls && controls.pointerLockControls && controls.pointerLockControls.isLocked) {
+                controls.pointerLockControls.unlock();
+            }
             showGameOverScreen();
             return;
         }
         
-        // Render the scene
-        renderer.render(scene, camera);
+        // Render the scene using the composer
+        // renderer.render(scene, camera); // Old line
+        composer.render(); // New line for post-processing
         
     } catch (error) {
         console.error('Error in animation loop:', error);
@@ -730,6 +851,8 @@ function animate() {
 //================================================================
 // Start the basic game immediately
 console.log('Initializing basic game...');
+initWater(); // Call the function to create the water
+initHidingSpots(); // Call to initialize hiding spots
 animate();
 
 // Load additional objects after a delay
@@ -743,6 +866,7 @@ window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight); // Add this line
 });
 
 // Add CSS animations
