@@ -56,42 +56,72 @@ export class FPSControls {
 
     // Walking sounds
     this.walkSound = new THREE.Audio(this.listener);
-    audioLoader.load('sounds/Sound Effects - Walking on Tile Floor.mp3', (buffer) => {
-      this.walkSound.setBuffer(buffer);
-      this.walkSound.setLoop(true); // Set to loop if desired
-      this.walkSound.setVolume(0.4);
-    });
+    audioLoader.load('sounds/Sound Effects - Walking on Tile Floor.mp3',
+        (buffer) => { // onSuccess
+            this.walkSound.setBuffer(buffer);
+            this.walkSound.setLoop(true);
+            this.walkSound.setVolume(0.4);
+        },
+        undefined, // onProgress
+        (error) => { // onError
+            console.warn('Failed to load walkSound "Sound Effects - Walking on Tile Floor.mp3":', error);
+        }
+    );
 
     // Water walking sounds
     this.waterWalkSound = new THREE.Audio(this.listener);
-    audioLoader.load('sounds/Walking Through Water Sound Effect.mp3', (buffer) => {
-      this.waterWalkSound.setBuffer(buffer);
-      this.waterWalkSound.setLoop(true);
-      this.waterWalkSound.setVolume(0.5); // Adjust volume as needed
-    });
+    audioLoader.load('sounds/Walking Through Water Sound Effect.mp3',
+        (buffer) => { // onSuccess
+            this.waterWalkSound.setBuffer(buffer);
+            this.waterWalkSound.setLoop(true);
+            this.waterWalkSound.setVolume(0.5);
+        },
+        undefined, // onProgress
+        (error) => { // onError
+            console.warn('Failed to load waterWalkSound "Walking Through Water Sound Effect.mp3":', error);
+        }
+    );
 
     // Breathing underwater sound
     this.breathingSound = new THREE.Audio(this.listener);
-    audioLoader.load('sounds/breathing-underwater.mp3', (buffer) => {
-      this.breathingSound.setBuffer(buffer);
-      this.breathingSound.setLoop(true);
-      this.breathingSound.setVolume(0.3);
-    });
+    audioLoader.load('sounds/breathing-underwater.mp3',
+        (buffer) => { // onSuccess
+            this.breathingSound.setBuffer(buffer);
+            this.breathingSound.setLoop(true);
+            this.breathingSound.setVolume(0.3);
+        },
+        undefined, // onProgress
+        (error) => { // onError
+            console.warn('Failed to load breathingSound "breathing-underwater.mp3":', error);
+        }
+    );
 
     // Splash sound
     this.splashSound = new THREE.Audio(this.listener);
-    audioLoader.load('sounds/water-splash.mp3', (buffer) => {
-      this.splashSound.setBuffer(buffer);
-      this.splashSound.setVolume(0.6);
-    });
+    audioLoader.load('sounds/water-splash.mp3',
+        (buffer) => { // onSuccess
+            this.splashSound.setBuffer(buffer);
+            this.splashSound.setVolume(0.6);
+        },
+        undefined, // onProgress
+        (error) => { // onError
+            console.warn('Failed to load splashSound "water-splash.mp3":', error);
+        }
+    );
 
     // Heartbeat sound for low health
     this.heartbeatSound = new THREE.Audio(this.listener);
-    audioLoader.load('sounds/heartbeat.mp3', (buffer) => {
-      this.heartbeatSound.setBuffer(buffer);
-      this.heartbeatSound.setLoop(true);
-      this.heartbeatSound.setVolume(0.4);
-    });
+    audioLoader.load('sounds/heartbeat.mp3',
+        (buffer) => { // onSuccess
+            this.heartbeatSound.setBuffer(buffer);
+            this.heartbeatSound.setLoop(true);
+            this.heartbeatSound.setVolume(0.4);
+        },
+        undefined, // onProgress
+        (error) => { // onError
+            console.warn('Failed to load heartbeatSound "heartbeat.mp3":', error);
+        }
+    );
   }
 
   initUIElements() {
@@ -531,11 +561,17 @@ export class FPSControls {
     // Create and play jump sound effect
     const jumpSound = new THREE.Audio(this.listener);
     const audioLoader = new THREE.AudioLoader();
-    audioLoader.load('sounds/jump.mp3', (buffer) => {
-      jumpSound.setBuffer(buffer);
-      jumpSound.setVolume(0.4);
-      jumpSound.play();
-    });
+    audioLoader.load('sounds/jump.mp3',
+        (buffer) => { // onSuccess
+            jumpSound.setBuffer(buffer);
+            jumpSound.setVolume(0.4);
+            jumpSound.play();
+        },
+        undefined, // onProgress
+        (error) => { // onError
+            console.warn('Failed to load jumpSound "jump.mp3":', error);
+        }
+    );
   }
 
   gameFinished() {

@@ -224,7 +224,7 @@ class GameStateManager {
         };
         this.floodLevel = 0;
         this.maxFloodLevel = 15;
-        this.floodSpeed = 0.002;
+        this.floodSpeed = 0.05; // Increased speed
         this.ambientIntensity = 1.0;
         this.lastHeartbeat = 0;
     }
@@ -705,12 +705,11 @@ function loadGameObjects() {
         }
         
         if (design) {
-            try {
-                design.loadWall(scene, { x: 0, y: 0, z: -50 }, '/images/texture/tile.jpg');
-                design.loadWall(scene, { x: 0, y: 0, z: 50 }, '/images/texture/tile.jpg');
-            } catch (error) {
-                console.warn('Failed to load walls:', error);
-            }
+            // Removed the old try...catch block for these calls
+            design.loadWall(scene, { x: 0, y: 0, z: -50 }, '/images/texture/tile.jpg')
+                .catch(error => console.warn('Error loading wall (z: -50):', error));
+            design.loadWall(scene, { x: 0, y: 0, z: 50 }, '/images/texture/tile.jpg')
+                .catch(error => console.warn('Error loading wall (z: 50):', error));
         }
     });
 }
@@ -822,10 +821,16 @@ function animate() {
         // Check win/lose conditions
         if (gameState.currentState === 'victory') {
             cancelAnimationFrame(animationId);
+            if (controls && controls.pointerLockControls && controls.pointerLockControls.isLocked) {
+                controls.pointerLockControls.unlock();
+            }
             // showVictoryScreen(); // Removed
             return;
         } else if (gameState.currentState === 'gameOver') {
             cancelAnimationFrame(animationId);
+            if (controls && controls.pointerLockControls && controls.pointerLockControls.isLocked) {
+                controls.pointerLockControls.unlock();
+            }
             showGameOverScreen();
             return;
         }
