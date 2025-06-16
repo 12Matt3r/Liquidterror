@@ -426,6 +426,7 @@
     <div id="key-collect-note" class="note">Press C to collect the key</div>
     <div id="door-open-note" class="note">Press E to unlock the door</div>
     <div id="nudge-note" class="note">Press E to nudge</div>
+    <div id="read-note-prompt" class="note">Press E to read message</div>
 
     <!-- ========================================|
          Enhanced Key Image Container
@@ -442,6 +443,14 @@
     </div>
     <div class="inventory2">
         <img src="./images/pics/candleinventory.png" alt="Candle">
+    </div>
+
+    <!-- Message Overlay -->
+    <div id="message-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); z-index: 1001; justify-content: center; align-items: center;">
+        <div id="message-content" style="background-color: #fefefe; padding: 20px; border-radius: 5px; width: 80%; max-width: 500px; min-height: 100px; color: #333; position: relative; font-family: 'Courier New', Courier, monospace;">
+            <p id="message-text"></p>
+            <button id="close-message-btn" style="position: absolute; top: 10px; right: 10px; padding: 5px 10px; cursor: pointer;">X</button>
+        </div>
     </div>
 
     <!-- ========================================|

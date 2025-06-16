@@ -12,6 +12,14 @@ let waterMesh;
 let waterNormalTexture;
 let composer;
 let hidingSpots = [];
+let flickeringMaterials = [];
+let floatingDebrisArray = [];
+
+const messages = [
+    "The water keeps rising... I saw something in the generator room. It wasn't human. Power's out down there. Don't go. -J",
+    "Tried the main stairs... blocked. Found some kind of key in security. Maybe it's for the exit door on this level? God, I hope so. The growling is getting closer."
+];
+let messageBottles = []; // To store bottle meshes for animation
 
 //================================================================
 // Scene Setup - Ensure Basic Functionality First
@@ -206,6 +214,103 @@ function initHidingSpots() {
     });
     */
 }
+
+//================================================================
+// Message Bottles
+//================================================================
+function initMessageBottles() {
+    const bottleMaterial = new THREE.MeshStandardMaterial({ color: 0x6c81a0, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.8 });
+    const bottleRadius = 0.15;
+    const bottleHeight = 0.5;
+    const bottleGeometry = new THREE.CylinderGeometry(bottleRadius, bottleRadius * 0.8, bottleHeight, 16);
+
+    const positions = [
+        new THREE.Vector3(10, 0, 10), // Placeholder position 1
+        new THREE.Vector3(-5, 0, -8)  // Placeholder position 2
+    ];
+
+    for (let i = 0; i < positions.length; i++) {
+        if (i >= messages.length) break; // Don't create more bottles than messages
+
+        const bottleMesh = new THREE.Mesh(bottleGeometry, bottleMaterial.clone()); // Clone material
+        bottleMesh.position.copy(positions[i]);
+        bottleMesh.userData = {
+            type: 'messageBottle',
+            messageId: i,
+            isInteractable: true, // Use this to differentiate from 'interactable' on key/door
+            baseY: bottleMesh.position.y,
+            bobOffset: Math.random() * Math.PI * 2
+        };
+        bottleMesh.name = `messageBottle_${i}`;
+        scene.add(bottleMesh);
+        if (interactionSystem && interactionSystem.interactables) {
+            interactionSystem.interactables.push(bottleMesh);
+        }
+        messageBottles.push(bottleMesh);
+    }
+}
+
+function displayMessage(messageId) {
+    const overlay = document.getElementById('message-overlay');
+    const textElement = document.getElementById('message-text');
+    const closeBtn = document.getElementById('close-message-btn');
+
+    if (overlay && textElement && closeBtn && messages[messageId] !== undefined) {
+        textElement.textContent = messages[messageId];
+        overlay.style.display = 'flex'; // Show overlay
+
+        // Temporarily disable FPS controls
+        if (controls && controls.pointerLockControls) {
+            controls.pointerLockControls.unlock(); // Unlock to interact with button
+        }
+
+        const closeMessageHandler = () => {
+            overlay.style.display = 'none';
+            closeBtn.removeEventListener('click', closeMessageHandler);
+        };
+        closeBtn.addEventListener('click', closeMessageHandler, { once: true });
+    }
+}
+
+//================================================================
+// Floating Debris
+//================================================================
+function initFloatingDebris() {
+    const debrisCount = 20;
+    const debrisMaterial = new THREE.MeshStandardMaterial({
+        color: 0x5C4033, // Dark brownish color
+        roughness: 0.8,
+        metalness: 0.1
+    });
+
+    for (let i = 0; i < debrisCount; i++) {
+        const width = 0.1 + Math.random() * 0.4; // Random width between 0.1 and 0.5
+        const height = 0.02 + Math.random() * 0.08; // Random height (thickness)
+        const depth = 0.1 + Math.random() * 0.4;  // Random depth
+        const debrisGeometry = new THREE.BoxGeometry(width, height, depth);
+
+        const debris = new THREE.Mesh(debrisGeometry, debrisMaterial);
+
+        // Distribute randomly within a range, e.g., -30 to 30 on X and Z
+        debris.position.x = (Math.random() - 0.5) * 60;
+        debris.position.z = (Math.random() - 0.5) * 60;
+        // Y position will be set dynamically in animate loop
+
+        debris.userData = {
+            bobOffset: Math.random() * Math.PI * 2,
+            driftSpeedX: (Math.random() - 0.5) * 0.002, // Slow drift
+            driftSpeedZ: (Math.random() - 0.5) * 0.002,
+            rotationSpeedX: (Math.random() - 0.5) * 0.001,
+            rotationSpeedY: (Math.random() - 0.5) * 0.001,
+            rotationSpeedZ: (Math.random() - 0.5) * 0.001
+        };
+
+        scene.add(debris);
+        floatingDebrisArray.push(debris);
+    }
+    // console.log(`Initialized ${debrisCount} floating debris objects.`);
+}
+
 
 //================================================================
 // Game State Management System
@@ -673,8 +778,12 @@ class BasicInteractionSystem {
         let nearestDistance = Infinity;
 
         this.interactables.forEach(obj => {
-            if (!obj.userData.interactable) return;
-            
+            // Updated condition to check both 'interactable' and 'isInteractable'
+            if (obj.userData.interactable === false || obj.userData.isInteractable === false) return;
+            // If neither is explicitly false, and at least one is true (or just exists for backward compatibility)
+            if (!obj.userData.interactable && !obj.userData.isInteractable) return;
+
+
             const distance = playerPosition.distanceTo(obj.position);
             if (distance < 5 && distance < nearestDistance) {
                 nearestDistance = distance;
@@ -691,11 +800,14 @@ class BasicInteractionSystem {
     updateInteractionUI(obj) {
         const keyNote = document.getElementById('key-collect-note');
         const doorNote = document.getElementById('door-open-note');
-        const nudgeNote = document.getElementById('nudge-note'); // New
+        const nudgeNote = document.getElementById('nudge-note');
+        const readNotePrompt = document.getElementById('read-note-prompt');
         
         if (keyNote) keyNote.style.display = 'none';
         if (doorNote) doorNote.style.display = 'none';
-        if (nudgeNote) nudgeNote.style.display = 'none'; // New
+        if (nudgeNote) nudgeNote.style.display = 'none';
+        if (readNotePrompt) readNotePrompt.style.display = 'none';
+
 
         if (obj) {
             if (obj.userData.type === 'key' && !obj.userData.collected && keyNote) {
@@ -705,8 +817,10 @@ class BasicInteractionSystem {
                 doorNote.textContent = obj.userData.locked ? 
                     (this.gameState.hasKey ? 'Press E to unlock door' : 'Door is locked - find the key') :
                     'Press E to open door';
-            } else if (obj.userData.isNudgable && nudgeNote) { // New condition
+            } else if (obj.userData.isNudgable && nudgeNote) {
                 nudgeNote.style.display = 'block';
+            } else if (obj.userData.type === 'messageBottle' && obj.userData.isInteractable && readNotePrompt) {
+                readNotePrompt.style.display = 'block';
             }
         }
     }
@@ -719,8 +833,13 @@ class BasicInteractionSystem {
             this.collectKey(obj);
         } else if (obj.userData.type === 'door') {
             this.interactWithDoor(obj);
-        } else if (obj.userData.isNudgable) { // Added this condition
+        } else if (obj.userData.isNudgable) {
             this.nudgeObject(obj);
+        } else if (obj.userData.type === 'messageBottle' && obj.userData.isInteractable) { // New condition
+            displayMessage(obj.userData.messageId);
+            // Optional: make bottle non-interactable or disappear after reading
+            // obj.userData.isInteractable = false;
+            // obj.visible = false;
         }
     }
 
@@ -872,10 +991,48 @@ function loadGameObjects() {
                     .catch(error => console.warn('Error processing flower for interaction:', error));
             }
 
+            // Handle desk for emissive effect
+            if (objects.createdesk) {
+                objects.createdesk(scene)
+                    .then(deskObj => {
+                        if (deskObj) {
+                            let screenMesh = null;
+                            deskObj.traverse((child) => {
+                                if (child.isMesh) {
+                                    if (child.name.toLowerCase().includes('screen') || child.name.toLowerCase().includes('monitor')) {
+                                        screenMesh = child;
+                                    }
+                                }
+                            });
+
+                            if (screenMesh) {
+                                if (screenMesh.material && screenMesh.material.isMeshStandardMaterial) {
+                                    screenMesh.material.emissive = new THREE.Color(0x004488); // Dim blue
+                                    screenMesh.material.emissiveIntensity = 1.0; // Base intensity
+                                    flickeringMaterials.push({
+                                        material: screenMesh.material,
+                                        baseIntensity: 1.0,
+                                        lastFlickerTime: 0,
+                                        onDuration: 200 + Math.random() * 300,
+                                        offDuration: 50 + Math.random() * 150,
+                                        flickerState: true
+                                    });
+                                    // console.log("Found screen mesh, made it emissive and flickerable:", screenMesh.name);
+                                } else if (screenMesh.material) {
+                                    // console.warn("Screen mesh material is not MeshStandardMaterial:", screenMesh.material.type);
+                                }
+                            } else {
+                                // console.warn("Could not find a 'screen' mesh in the office_desk model for flickering effect.");
+                            }
+                        }
+                    })
+                    .catch(error => console.warn('Error processing desk for emissive effect:', error));
+            }
+
             // Load other objects from objects.js
             const objectLoaders = {
                 'Chair': objects.createChair,
-                'Desk': objects.createdesk,
+                // 'Desk': objects.createdesk, // Handled above
                 'Air Conditioner': objects.createaircon,
                 // 'Flower': objects.createflower, // Handled above
                 // 'Frame': objects.createframe,   // Handled above
@@ -979,6 +1136,24 @@ function animate() {
         animationId = requestAnimationFrame(animate);
         
         const delta = clock.getDelta();
+        const currentTime = Date.now(); // Get current time once per frame for flicker logic
+
+        flickeringMaterials.forEach(item => {
+            item.material.needsUpdate = false;
+
+            if (currentTime - item.lastFlickerTime > (item.flickerState ? item.onDuration : item.offDuration)) {
+                item.flickerState = !item.flickerState;
+                if (item.flickerState) {
+                    item.material.emissiveIntensity = item.baseIntensity;
+                } else {
+                    item.material.emissiveIntensity = Math.random() < 0.3 ? 0 : item.baseIntensity * 0.1;
+                }
+                item.lastFlickerTime = currentTime;
+                item.onDuration = 50 + Math.random() * 450;
+                item.offDuration = 50 + Math.random() * 250;
+                item.material.needsUpdate = true;
+            }
+        });
 
         // Update water mesh
         if (waterMesh) {
@@ -988,6 +1163,37 @@ function animate() {
                 waterMesh.material.normalMap.offset.y += 0.0005;
             }
         }
+
+        // Animate message bottles
+        messageBottles.forEach(bottle => {
+            bottle.position.y = gameState.floodLevel + 0.1 + (Math.sin(currentTime * 0.001 + bottle.userData.bobOffset) * 0.05); // Use currentTime
+            bottle.rotation.y += 0.002; // Gentle spin
+            bottle.rotation.x = Math.sin(currentTime * 0.0005 + bottle.userData.bobOffset) * 0.1; // Gentle rock
+            bottle.rotation.z = Math.cos(currentTime * 0.0007 + bottle.userData.bobOffset) * 0.1; // Gentle rock
+        });
+
+        // Animate floating debris
+        floatingDebrisArray.forEach(debris => {
+            // Y position based on flood level + bobbing
+            const baseFloodY = gameState.floodLevel + 0.05; // Slightly above water plane
+            debris.position.y = baseFloodY + (Math.sin(currentTime * 0.0005 + debris.userData.bobOffset) * 0.05);
+
+            // Apply drift
+            debris.position.x += debris.userData.driftSpeedX;
+            debris.position.z += debris.userData.driftSpeedZ;
+
+            // Apply slow rotation
+            debris.rotation.x += debris.userData.rotationSpeedX;
+            debris.rotation.y += debris.userData.rotationSpeedY;
+            debris.rotation.z += debris.userData.rotationSpeedZ;
+
+            // Simple bounds wrapping
+            const boundSize = 40;
+            if (debris.position.x > boundSize) debris.position.x = -boundSize;
+            if (debris.position.x < -boundSize) debris.position.x = boundSize;
+            if (debris.position.z > boundSize) debris.position.z = -boundSize;
+            if (debris.position.z < -boundSize) debris.position.z = boundSize;
+        });
         
         // Animate test cubes to show the scene is working
         testCube1.rotation.y += delta;
@@ -1054,6 +1260,8 @@ function animate() {
 console.log('Initializing basic game...');
 initWater(); // Call the function to create the water
 initHidingSpots(); // Call to initialize hiding spots
+initMessageBottles(); // Call to initialize message bottles
+initFloatingDebris(); // Call to initialize floating debris
 animate();
 
 // Load additional objects after a delay
