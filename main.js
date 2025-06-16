@@ -12,6 +12,23 @@ let waterMesh;
 let waterNormalTexture;
 let composer;
 let hidingSpots = [];
+let flickeringMaterials = [];
+let floatingDebrisArray = [];
+
+const messages = [
+    "The water keeps rising... I saw something in the generator room. It wasn't human. Power's out down there. Don't go. -J",
+    "Tried the main stairs... blocked. Found some kind of key in security. Maybe it's for the exit door on this level? God, I hope so. The growling is getting closer."
+];
+let messageBottles = []; // To store bottle meshes for animation
+
+const OBJECTIVES = {
+    INIT: "Find a way to escape the building.",
+    KEY_NEEDED: "A key is needed to unlock the exit.",
+    KEY_COLLECTED: "Key acquired! Find the door it unlocks.",
+    DOOR_UNLOCKED: "Door unlocked! Reach the final exit point.",
+    GAME_OVER: "You were overcome by the flood...",
+    VICTORY: "You have escaped!"
+};
 
 //================================================================
 // Scene Setup - Ensure Basic Functionality First
@@ -56,11 +73,11 @@ camera.position.set(37, 6, 11);
 // Basic Lighting Setup - Essential for Visibility
 //================================================================
 // Strong ambient light to ensure visibility
-const ambientLight = new THREE.AmbientLight(0x404040, 1.2);
+const ambientLight = new THREE.AmbientLight(0x404040, 0.7); // New intensity
 scene.add(ambientLight);
 
 // Main directional light
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1.8);
+const directionalLight = new THREE.DirectionalLight(0xEEF2FF, 1.4); // New color and intensity
 directionalLight.position.set(10, 20, 10);
 directionalLight.castShadow = true;
 directionalLight.shadow.mapSize.width = 1024;
@@ -68,11 +85,11 @@ directionalLight.shadow.mapSize.height = 1024;
 scene.add(directionalLight);
 
 // Additional point lights for better illumination
-const pointLight1 = new THREE.PointLight(0xffffff, 1, 50);
+const pointLight1 = new THREE.PointLight(0xffffff, 0.6, 50); // New intensity
 pointLight1.position.set(20, 15, 20);
 scene.add(pointLight1);
 
-const pointLight2 = new THREE.PointLight(0xffffff, 0.8, 40);
+const pointLight2 = new THREE.PointLight(0xffffff, 0.4, 40); // New intensity
 pointLight2.position.set(-20, 12, -20);
 scene.add(pointLight2);
 
@@ -208,6 +225,103 @@ function initHidingSpots() {
 }
 
 //================================================================
+// Message Bottles
+//================================================================
+function initMessageBottles() {
+    const bottleMaterial = new THREE.MeshStandardMaterial({ color: 0x6c81a0, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.8 });
+    const bottleRadius = 0.15;
+    const bottleHeight = 0.5;
+    const bottleGeometry = new THREE.CylinderGeometry(bottleRadius, bottleRadius * 0.8, bottleHeight, 16);
+
+    const positions = [
+        new THREE.Vector3(10, 0, 10), // Placeholder position 1
+        new THREE.Vector3(-5, 0, -8)  // Placeholder position 2
+    ];
+
+    for (let i = 0; i < positions.length; i++) {
+        if (i >= messages.length) break; // Don't create more bottles than messages
+
+        const bottleMesh = new THREE.Mesh(bottleGeometry, bottleMaterial.clone()); // Clone material
+        bottleMesh.position.copy(positions[i]);
+        bottleMesh.userData = {
+            type: 'messageBottle',
+            messageId: i,
+            isInteractable: true, // Use this to differentiate from 'interactable' on key/door
+            baseY: bottleMesh.position.y,
+            bobOffset: Math.random() * Math.PI * 2
+        };
+        bottleMesh.name = `messageBottle_${i}`;
+        scene.add(bottleMesh);
+        if (interactionSystem && interactionSystem.interactables) {
+            interactionSystem.interactables.push(bottleMesh);
+        }
+        messageBottles.push(bottleMesh);
+    }
+}
+
+function displayMessage(messageId) {
+    const overlay = document.getElementById('message-overlay');
+    const textElement = document.getElementById('message-text');
+    const closeBtn = document.getElementById('close-message-btn');
+
+    if (overlay && textElement && closeBtn && messages[messageId] !== undefined) {
+        textElement.textContent = messages[messageId];
+        overlay.style.display = 'flex'; // Show overlay
+
+        // Temporarily disable FPS controls
+        if (controls && controls.pointerLockControls) {
+            controls.pointerLockControls.unlock(); // Unlock to interact with button
+        }
+
+        const closeMessageHandler = () => {
+            overlay.style.display = 'none';
+            closeBtn.removeEventListener('click', closeMessageHandler);
+        };
+        closeBtn.addEventListener('click', closeMessageHandler, { once: true });
+    }
+}
+
+//================================================================
+// Floating Debris
+//================================================================
+function initFloatingDebris() {
+    const debrisCount = 20;
+    const debrisMaterial = new THREE.MeshStandardMaterial({
+        color: 0x5C4033, // Dark brownish color
+        roughness: 0.8,
+        metalness: 0.1
+    });
+
+    for (let i = 0; i < debrisCount; i++) {
+        const width = 0.1 + Math.random() * 0.4; // Random width between 0.1 and 0.5
+        const height = 0.02 + Math.random() * 0.08; // Random height (thickness)
+        const depth = 0.1 + Math.random() * 0.4;  // Random depth
+        const debrisGeometry = new THREE.BoxGeometry(width, height, depth);
+
+        const debris = new THREE.Mesh(debrisGeometry, debrisMaterial);
+
+        // Distribute randomly within a range, e.g., -30 to 30 on X and Z
+        debris.position.x = (Math.random() - 0.5) * 60;
+        debris.position.z = (Math.random() - 0.5) * 60;
+        // Y position will be set dynamically in animate loop
+
+        debris.userData = {
+            bobOffset: Math.random() * Math.PI * 2,
+            driftSpeedX: (Math.random() - 0.5) * 0.002, // Slow drift
+            driftSpeedZ: (Math.random() - 0.5) * 0.002,
+            rotationSpeedX: (Math.random() - 0.5) * 0.001,
+            rotationSpeedY: (Math.random() - 0.5) * 0.001,
+            rotationSpeedZ: (Math.random() - 0.5) * 0.001
+        };
+
+        scene.add(debris);
+        floatingDebrisArray.push(debris);
+    }
+    // console.log(`Initialized ${debrisCount} floating debris objects.`);
+}
+
+
+//================================================================
 // Game State Management System
 //================================================================
 class GameStateManager {
@@ -225,6 +339,7 @@ class GameStateManager {
         this.floodLevel = 0;
         this.maxFloodLevel = 15;
         this.floodSpeed = 0.05; // Increased speed
+        this.currentObjectiveKey = 'INIT'; // Initialize here
         this.ambientIntensity = 1.0;
         this.lastHeartbeat = 0;
     }
@@ -242,6 +357,10 @@ class GameStateManager {
         this.playerHealth = Math.max(0, this.playerHealth - amount);
         if (this.playerHealth <= 0) {
             this.currentState = 'gameOver';
+            this.currentObjectiveKey = 'GAME_OVER';
+            if (typeof updateObjectiveDisplay === 'function') {
+                 updateObjectiveDisplay();
+            }
         }
         
         // Trigger heartbeat effect when health is low
@@ -294,6 +413,27 @@ class GameStateManager {
 }
 
 const gameState = new GameStateManager();
+
+//================================================================
+// Objective Display Logic
+//================================================================
+function updateObjectiveDisplay() {
+    const objectiveDisplayElement = document.getElementById('objective-display');
+    if (objectiveDisplayElement && gameState && gameState.currentObjectiveKey) {
+        const objectiveText = OBJECTIVES[gameState.currentObjectiveKey];
+        if (objectiveText) {
+            objectiveDisplayElement.textContent = objectiveText;
+            objectiveDisplayElement.style.opacity = '0.9'; // Ensure visible
+        } else {
+            // console.warn("Unknown objective key:", gameState.currentObjectiveKey);
+            objectiveDisplayElement.textContent = ''; // Clear if key is unknown
+            objectiveDisplayElement.style.opacity = '0'; // Hide if no text
+        }
+    } else if (objectiveDisplayElement) {
+        objectiveDisplayElement.textContent = ''; // Clear if no key
+        objectiveDisplayElement.style.opacity = '0'; // Hide if no text
+    }
+}
 
 //================================================================
 // Basic Particle System
@@ -351,13 +491,79 @@ class BasicZombieAI {
         this.camera = camera;
         this.fpsControls = fpsControls; // Store it
         this.zombie = null;
-        this.state = 'patrol';
-        this.speed = 0.02;
-        this.detectionRange = 30;
+        this.raycaster = new THREE.Raycaster(); // From previous step
+
+        this.state = 'PATROL'; // Initial state: PATROL, CHASING, SEARCHING_LKL
+        this.speed = 0.02; // Base speed
+        this.chaseSpeed = 0.035; // Slightly faster when chasing
+        this.detectionRange = 30; // Main awareness/LOS check radius
         this.attackRange = 3;
         this.lastAttackTime = 0;
+
+        this.lastKnownPlayerPosition = null;
+        this.timeSpentSearching = 0;
+        this.searchDuration = 10; // Seconds to search at LKL
+        this.patrolWaypoints = [ // Example waypoints if we add patrolling later
+            // new THREE.Vector3(-20, 0, -20),
+            // new THREE.Vector3(20, 0, -20),
+        ];
+        this.currentWaypointIndex = 0;
         
         this.loadZombie();
+    }
+
+    hasLineOfSightToPlayer(currentEffectiveRange) { // Added currentEffectiveRange parameter
+        if (!this.zombie || !this.camera || !this.scene) return false;
+
+        const zombieEyePosition = new THREE.Vector3();
+        // Assuming this.zombie is the group/object whose position is set.
+        // The zombie's base Y is often its feet. Its height might be around 1.8 units * scale.
+        zombieEyePosition.copy(this.zombie.position);
+        const eyeHeightOffset = 1.6 * this.zombie.scale.y * 0.9; // Approx 90% of a 1.6 unit model height, scaled
+        zombieEyePosition.y += eyeHeightOffset;
+
+        const playerPosition = this.camera.position.clone();
+        const directionToPlayer = new THREE.Vector3().subVectors(playerPosition, zombieEyePosition).normalize();
+
+        this.raycaster.set(zombieEyePosition, directionToPlayer);
+        this.raycaster.near = 0.5; // Increased near to avoid hitting parts of zombie model itself easily
+        this.raycaster.far = currentEffectiveRange + 5; // Use currentEffectiveRange
+
+        const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+
+        // Filter out intersections with the zombie itself or other non-collidable objects
+        let firstValidHit = null;
+        for (const intersect of intersects) {
+            let currentObject = intersect.object;
+            let isSelf = false;
+            while (currentObject) {
+                if (currentObject === this.zombie) {
+                    isSelf = true;
+                    break;
+                }
+                // Add other potential non-collidable checks here
+                if (currentObject === waterMesh || (particleSystem && currentObject === particleSystem.particles)) {
+                    isSelf = true; // Treat as transparent for LOS
+                    break;
+                }
+                currentObject = currentObject.parent;
+            }
+            if (!isSelf) {
+                firstValidHit = intersect;
+                break;
+            }
+        }
+
+        if (firstValidHit) {
+            const distanceToPlayerActual = zombieEyePosition.distanceTo(playerPosition);
+            if (firstValidHit.distance > distanceToPlayerActual - 0.5) {
+                return true;
+            }
+            // Optional: console.log("LOS blocked by:", firstValidHit.object.name || firstValidHit.object.uuid, "at distance", firstValidHit.distance, "player at", distanceToPlayerActual);
+            return false;
+        }
+
+        return true;
     }
 
     loadZombie() {
@@ -395,44 +601,114 @@ class BasicZombieAI {
     }
 
     update(delta) {
-        if (!this.zombie) return;
+        if (!this.zombie || !this.camera || !this.fpsControls) return;
 
-        try {
-            const playerPosition = this.camera.position;
-            const zombiePosition = this.zombie.position;
-            const distanceToPlayer = playerPosition.distanceTo(zombiePosition);
+        const playerPosition = this.camera.position;
+        const zombiePosition = this.zombie.position;
+        const distanceToPlayer = playerPosition.distanceTo(zombiePosition);
 
-            if (this.fpsControls && this.fpsControls.isHiding) {
-                // Player is hiding. Zombie doesn't detect.
-                // (Future enhancement: zombie could still detect if it enters the same hiding spot)
-            } else {
-                // Stealth mechanics
-                const playerIsSneaking = this.fpsControls && this.fpsControls.movementSpeed < 1.0; // Threshold for sneaking
-                const currentDetectionRange = playerIsSneaking ? this.detectionRange / 2 : this.detectionRange;
-                // For debugging, you could add:
-                // if (playerIsSneaking) console.log("Player is sneaking, detection range: ", currentDetectionRange);
+        const playerIsHiding = this.fpsControls && this.fpsControls.isHiding;
+        if (playerIsHiding) { // If player is hiding, AI behavior is simplified
+            if (this.state === 'CHASING' || this.state === 'SEARCHING_LKL') {
+                this.state = 'PATROL';
+                this.lastKnownPlayerPosition = null;
+                // console.log("Zombie: Player hid, returning to PATROL");
+            }
+        }
 
-                if (distanceToPlayer < currentDetectionRange) { // Use currentDetectionRange
-                    const direction = new THREE.Vector3();
-                    direction.subVectors(playerPosition, zombiePosition).normalize();
-                    zombiePosition.addScaledVector(direction, this.speed);
-                this.zombie.lookAt(playerPosition);
+        const playerIsSneaking = this.fpsControls && !playerIsHiding && this.fpsControls.movementSpeed < 1.0;
+        const effectiveDetectionRange = playerIsSneaking ? this.detectionRange / 2 : this.detectionRange;
 
-                if (distanceToPlayer < this.attackRange) {
-                    const currentTime = Date.now();
-                    if (currentTime - this.lastAttackTime > 2000) {
-                        this.lastAttackTime = currentTime;
-                        gameState.takeDamage(15);
-                        this.triggerDamageEffect();
+        // Check LOS using the effectiveDetectionRange
+        const inLOS = !playerIsHiding && this.hasLineOfSightToPlayer(effectiveDetectionRange);
+
+        // --- State Machine ---
+        switch (this.state) {
+            case 'PATROL':
+                // Placeholder for actual patrol logic (e.g., move between waypoints)
+                // For now, just stand and look around or idle.
+                // Periodically check for player
+                if (distanceToPlayer < effectiveDetectionRange && inLOS) {
+                    this.state = 'CHASING';
+                    // console.log("Zombie: PATROL -> CHASING");
+                }
+                break;
+
+            case 'CHASING':
+                // playerIsHiding check now at the top of update()
+                if (inLOS && distanceToPlayer < this.detectionRange + 10) { // +10 chase persistence range
+                    this.lastKnownPlayerPosition = playerPosition.clone(); // Keep updating LKL while chasing with LOS
+
+                    const direction = new THREE.Vector3().subVectors(playerPosition, zombiePosition).normalize();
+                    zombiePosition.addScaledVector(direction, this.chaseSpeed); // Use chaseSpeed
+                    this.zombie.lookAt(playerPosition);
+
+                    if (distanceToPlayer < this.attackRange) {
+                        const currentTime = Date.now();
+                        if (currentTime - this.lastAttackTime > 2000) {
+                            this.lastAttackTime = currentTime;
+                            gameState.takeDamage(15);
+                            this.triggerDamageEffect();
+                            // console.log("Zombie: Attacking!");
+                        }
+                    }
+                } else {
+                    // Lost LOS or player is too far, but was just chasing
+                    if (this.lastKnownPlayerPosition) { // Should always have LKL if was chasing
+                        this.state = 'SEARCHING_LKL';
+                        this.timeSpentSearching = 0;
+                        // console.log("Zombie: CHASING -> SEARCHING_LKL at", this.lastKnownPlayerPosition);
+                    } else {
+                        this.state = 'PATROL'; // Should not happen if LKL was updated, but as a fallback
+                        // console.log("Zombie: CHASING -> PATROL (lost player, no LKL)");
                     }
                 }
-            }
+                break;
 
-            // Simple floating animation
-            zombiePosition.y = 2 + Math.sin(Date.now() * 0.002) * 0.3;
-        } catch (error) {
-            console.warn('Error updating zombie:', error);
+            case 'SEARCHING_LKL':
+                if (this.fpsControls.isHiding) {
+                    this.state = 'PATROL';
+                    this.lastKnownPlayerPosition = null;
+                    // console.log("Zombie: SEARCHING_LKL -> PATROL (player hid)");
+                    break;
+                }
+
+                // Try to re-acquire target
+                if (distanceToPlayer < this.detectionRange && inLOS) {
+                    this.state = 'CHASING';
+                    this.lastKnownPlayerPosition = null; // Clear LKL as target re-acquired
+                    // console.log("Zombie: SEARCHING_LKL -> CHASING (player re-acquired)");
+                    break;
+                }
+
+                if (this.lastKnownPlayerPosition) {
+                    const distanceToLKL = zombiePosition.distanceTo(this.lastKnownPlayerPosition);
+                    if (distanceToLKL > 1.0) { // Tolerance for reaching LKL
+                        const direction = new THREE.Vector3().subVectors(this.lastKnownPlayerPosition, zombiePosition).normalize();
+                        zombiePosition.addScaledVector(direction, this.speed); // Move at normal speed to LKL
+                        this.zombie.lookAt(this.lastKnownPlayerPosition);
+                    } else {
+                        // Arrived at LKL, now "search" (pause/wait)
+                        this.lastKnownPlayerPosition = null; // Indicate arrival and start "looking around" phase
+                        // console.log("Zombie: Arrived at LKL, now searching area.");
+                    }
+                } else {
+                    // At LKL (or no LKL was set), "look around" by waiting
+                    this.timeSpentSearching += delta;
+                    if (this.timeSpentSearching > this.searchDuration) {
+                        this.state = 'PATROL';
+                        this.timeSpentSearching = 0;
+                        // console.log("Zombie: SEARCHING_LKL -> PATROL (search time expired)");
+                    }
+                }
+                break;
         }
+
+        // Common logic (like floating animation) - keep outside the state machine if it always applies
+        if (this.state !== 'CHASING') { // Don't float if chasing, allow more grounded movement
+             zombiePosition.y = 2 + Math.sin(Date.now() * 0.002) * 0.3;
+        }
+
     }
 
     triggerDamageEffect() {
@@ -537,8 +813,12 @@ class BasicInteractionSystem {
         let nearestDistance = Infinity;
 
         this.interactables.forEach(obj => {
-            if (!obj.userData.interactable) return;
-            
+            // Updated condition to check both 'interactable' and 'isInteractable'
+            if (obj.userData.interactable === false || obj.userData.isInteractable === false) return;
+            // If neither is explicitly false, and at least one is true (or just exists for backward compatibility)
+            if (!obj.userData.interactable && !obj.userData.isInteractable) return;
+
+
             const distance = playerPosition.distanceTo(obj.position);
             if (distance < 5 && distance < nearestDistance) {
                 nearestDistance = distance;
@@ -555,9 +835,14 @@ class BasicInteractionSystem {
     updateInteractionUI(obj) {
         const keyNote = document.getElementById('key-collect-note');
         const doorNote = document.getElementById('door-open-note');
+        const nudgeNote = document.getElementById('nudge-note');
+        const readNotePrompt = document.getElementById('read-note-prompt');
         
         if (keyNote) keyNote.style.display = 'none';
         if (doorNote) doorNote.style.display = 'none';
+        if (nudgeNote) nudgeNote.style.display = 'none';
+        if (readNotePrompt) readNotePrompt.style.display = 'none';
+
 
         if (obj) {
             if (obj.userData.type === 'key' && !obj.userData.collected && keyNote) {
@@ -567,20 +852,49 @@ class BasicInteractionSystem {
                 doorNote.textContent = obj.userData.locked ? 
                     (this.gameState.hasKey ? 'Press E to unlock door' : 'Door is locked - find the key') :
                     'Press E to open door';
+            } else if (obj.userData.isNudgable && nudgeNote) {
+                nudgeNote.style.display = 'block';
+            } else if (obj.userData.type === 'messageBottle' && obj.userData.isInteractable && readNotePrompt) {
+                readNotePrompt.style.display = 'block';
             }
         }
     }
 
     attemptInteraction() {
         if (!this.currentFocused) return;
-
         const obj = this.currentFocused;
         
         if (obj.userData.type === 'key' && !obj.userData.collected) {
             this.collectKey(obj);
         } else if (obj.userData.type === 'door') {
             this.interactWithDoor(obj);
+        } else if (obj.userData.isNudgable) {
+            this.nudgeObject(obj);
+        } else if (obj.userData.type === 'messageBottle' && obj.userData.isInteractable) { // New condition
+            displayMessage(obj.userData.messageId);
+            // Optional: make bottle non-interactable or disappear after reading
+            // obj.userData.isInteractable = false;
+            // obj.visible = false;
         }
+    }
+
+    nudgeObject(object) {
+        if (!object) return;
+
+        const nudgeDirection = object.userData.lastNudgeSign || 1;
+        object.rotation.z += (Math.PI / 16) * nudgeDirection;
+        // Apply a small positional nudge as well, perhaps along its local X or a world X
+        // For simplicity, let's use world X for now.
+        object.position.x += 0.2 * nudgeDirection;
+
+        object.userData.lastNudgeSign = -nudgeDirection;
+
+        // Report noise event (generates noise points and plays sound via FPSControls)
+        if (controls && typeof controls.reportNoiseEvent === 'function') {
+            controls.reportNoiseEvent('nudge', 20); // Example noise amount for nudge: 20
+        }
+
+        // console.log(`Nudged ${object.userData.type}`);
     }
 
     collectKey(keyObj) {
@@ -589,6 +903,8 @@ class BasicInteractionSystem {
         keyObj.visible = false;
         
         this.gameState.collectKey();
+        this.gameState.currentObjectiveKey = 'KEY_COLLECTED';
+        updateObjectiveDisplay();
         
         const keyContainer = document.getElementById('key-image-container');
         if (keyContainer) {
@@ -605,6 +921,8 @@ class BasicInteractionSystem {
                 doorObj.userData.locked = false;
                 this.animateDoorOpen(doorObj);
                 this.gameState.objectives.doorUnlocked = true;
+                this.gameState.currentObjectiveKey = 'DOOR_UNLOCKED';
+                updateObjectiveDisplay();
             }
         }
         // Removed the else block that previously handled victory condition
@@ -650,8 +968,14 @@ function updateUI() {
         } else {
             document.body.style.borderBottom = 'none';
         }
+
+        // Call FPSControls specific UI updates
+        if (controls && typeof controls.updateUI === 'function') {
+            controls.updateUI(); // Pass delta if controls.updateUI needs it
+        }
+
     } catch (error) {
-        console.warn('Error updating UI:', error);
+        console.warn('Error updating main UI:', error); // Renamed from 'Error updating UI'
     }
 }
 
@@ -681,23 +1005,102 @@ function loadGameObjects() {
         import('./design.js').catch(() => null)
     ]).then(([objects, effects, design]) => {
         if (objects) {
-            loadObject(objects.createChair, 'Chair');
-            loadObject(objects.createdesk, 'Desk');
-            loadObject(objects.createaircon, 'Air Conditioner');
-            loadObject(objects.createflower, 'Flower');
-            loadObject(objects.createframe, 'Frame');
-            loadObject(objects.createdispenser, 'Dispenser');
-            loadObject(objects.created_design1, 'Design 1');
-            loadObject(objects.created_design2, 'Design 2');
-            loadObject(objects.created_design3, 'Design 3');
-            loadObject(objects.created_floor, 'Floor');
-            loadObject(objects.created_hallchairs, 'Hall Chairs');
-            loadObject(objects.created_cheaproom, 'Cheap Room');
-            loadObject(objects.created_fence, 'Fence');
-            loadObject(objects.created_statue, 'Statue');
-            loadObject(objects.created_ceiling, 'Ceiling');
-            loadObject(objects.created_nearstatue, 'Near Statue');
-            loadObject(objects.created_fallingceiling, 'Falling Ceiling');
+            // Handle nudgable items separately
+            if (objects.createframe) {
+                objects.createframe(scene)
+                    .then(frameObj => {
+                        if (frameObj) {
+                            frameObj.userData.isNudgable = true;
+                            frameObj.userData.type = 'frame';
+                            if (interactionSystem && interactionSystem.interactables) {
+                                interactionSystem.interactables.push(frameObj);
+                            }
+                            // console.log("Frame processed for interaction");
+                        }
+                    })
+                    .catch(error => console.warn('Error processing frame for interaction:', error));
+            }
+
+            if (objects.createflower) {
+                objects.createflower(scene)
+                    .then(flowerObj => {
+                        if (flowerObj) {
+                            flowerObj.userData.isNudgable = true;
+                            flowerObj.userData.type = 'flower';
+                            if (interactionSystem && interactionSystem.interactables) {
+                                interactionSystem.interactables.push(flowerObj);
+                            }
+                            // console.log("Flower processed for interaction");
+                        }
+                    })
+                    .catch(error => console.warn('Error processing flower for interaction:', error));
+            }
+
+            // Handle desk for emissive effect
+            if (objects.createdesk) {
+                objects.createdesk(scene)
+                    .then(deskObj => {
+                        if (deskObj) {
+                            let screenMesh = null;
+                            deskObj.traverse((child) => {
+                                if (child.isMesh) {
+                                    if (child.name.toLowerCase().includes('screen') || child.name.toLowerCase().includes('monitor')) {
+                                        screenMesh = child;
+                                    }
+                                }
+                            });
+
+                            if (screenMesh) {
+                                if (screenMesh.material && screenMesh.material.isMeshStandardMaterial) {
+                                    screenMesh.material.emissive = new THREE.Color(0x004488); // Dim blue
+                                    screenMesh.material.emissiveIntensity = 1.0; // Base intensity
+                                    flickeringMaterials.push({
+                                        material: screenMesh.material,
+                                        baseIntensity: 1.0,
+                                        lastFlickerTime: 0,
+                                        onDuration: 200 + Math.random() * 300,
+                                        offDuration: 50 + Math.random() * 150,
+                                        flickerState: true
+                                    });
+                                    // console.log("Found screen mesh, made it emissive and flickerable:", screenMesh.name);
+                                } else if (screenMesh.material) {
+                                    // console.warn("Screen mesh material is not MeshStandardMaterial:", screenMesh.material.type);
+                                }
+                            } else {
+                                // console.warn("Could not find a 'screen' mesh in the office_desk model for flickering effect.");
+                            }
+                        }
+                    })
+                    .catch(error => console.warn('Error processing desk for emissive effect:', error));
+            }
+
+            // Load other objects from objects.js
+            const objectLoaders = {
+                'Chair': objects.createChair,
+                // 'Desk': objects.createdesk, // Handled above
+                'Air Conditioner': objects.createaircon,
+                // 'Flower': objects.createflower, // Handled above
+                // 'Frame': objects.createframe,   // Handled above
+                'Dispenser': objects.createdispenser,
+                'Design 1': objects.created_design1,
+                'Design 2': objects.created_design2,
+                'Design 3': objects.created_design3,
+                'Floor': objects.created_floor,
+                'Hall Chairs': objects.created_hallchairs,
+                'Cheap Room': objects.created_cheaproom,
+                'Fence': objects.created_fence,
+                'Statue': objects.created_statue,
+                'Ceiling': objects.created_ceiling,
+                'Near Statue': objects.created_nearstatue,
+                'Falling Ceiling': objects.created_fallingceiling
+            };
+            for (const [name, loaderFunc] of Object.entries(objectLoaders)) {
+                if (loaderFunc) { // Check if loaderFunc exists
+                     loaderFunc(scene) // Assuming these also add to scene and return promise
+                        .then(obj => { /* console.log(`${name} loaded.`); */ })
+                        .catch(error => console.warn(`Error loading ${name}:`, error));
+                }
+            }
         }
         
         if (effects) {
@@ -778,6 +1181,24 @@ function animate() {
         animationId = requestAnimationFrame(animate);
         
         const delta = clock.getDelta();
+        const currentTime = Date.now(); // Get current time once per frame for flicker logic
+
+        flickeringMaterials.forEach(item => {
+            item.material.needsUpdate = false;
+
+            if (currentTime - item.lastFlickerTime > (item.flickerState ? item.onDuration : item.offDuration)) {
+                item.flickerState = !item.flickerState;
+                if (item.flickerState) {
+                    item.material.emissiveIntensity = item.baseIntensity;
+                } else {
+                    item.material.emissiveIntensity = Math.random() < 0.3 ? 0 : item.baseIntensity * 0.1;
+                }
+                item.lastFlickerTime = currentTime;
+                item.onDuration = 50 + Math.random() * 450;
+                item.offDuration = 50 + Math.random() * 250;
+                item.material.needsUpdate = true;
+            }
+        });
 
         // Update water mesh
         if (waterMesh) {
@@ -787,6 +1208,37 @@ function animate() {
                 waterMesh.material.normalMap.offset.y += 0.0005;
             }
         }
+
+        // Animate message bottles
+        messageBottles.forEach(bottle => {
+            bottle.position.y = gameState.floodLevel + 0.1 + (Math.sin(currentTime * 0.001 + bottle.userData.bobOffset) * 0.05); // Use currentTime
+            bottle.rotation.y += 0.002; // Gentle spin
+            bottle.rotation.x = Math.sin(currentTime * 0.0005 + bottle.userData.bobOffset) * 0.1; // Gentle rock
+            bottle.rotation.z = Math.cos(currentTime * 0.0007 + bottle.userData.bobOffset) * 0.1; // Gentle rock
+        });
+
+        // Animate floating debris
+        floatingDebrisArray.forEach(debris => {
+            // Y position based on flood level + bobbing
+            const baseFloodY = gameState.floodLevel + 0.05; // Slightly above water plane
+            debris.position.y = baseFloodY + (Math.sin(currentTime * 0.0005 + debris.userData.bobOffset) * 0.05);
+
+            // Apply drift
+            debris.position.x += debris.userData.driftSpeedX;
+            debris.position.z += debris.userData.driftSpeedZ;
+
+            // Apply slow rotation
+            debris.rotation.x += debris.userData.rotationSpeedX;
+            debris.rotation.y += debris.userData.rotationSpeedY;
+            debris.rotation.z += debris.userData.rotationSpeedZ;
+
+            // Simple bounds wrapping
+            const boundSize = 40;
+            if (debris.position.x > boundSize) debris.position.x = -boundSize;
+            if (debris.position.x < -boundSize) debris.position.x = boundSize;
+            if (debris.position.z > boundSize) debris.position.z = -boundSize;
+            if (debris.position.z < -boundSize) debris.position.z = boundSize;
+        });
         
         // Animate test cubes to show the scene is working
         testCube1.rotation.y += delta;
@@ -851,8 +1303,11 @@ function animate() {
 //================================================================
 // Start the basic game immediately
 console.log('Initializing basic game...');
+updateObjectiveDisplay(); // Initial display based on gameState.currentObjectiveKey
 initWater(); // Call the function to create the water
 initHidingSpots(); // Call to initialize hiding spots
+initMessageBottles(); // Call to initialize message bottles
+initFloatingDebris(); // Call to initialize floating debris
 animate();
 
 // Load additional objects after a delay
@@ -885,3 +1340,6 @@ gameStyles.textContent = `
 document.head.appendChild(gameStyles);
 
 console.log('Game initialized successfully');
+
+// Expose updateObjectiveDisplay globally if not already module-scoped in a way FPSControls can access
+window.updateObjectiveDisplay = updateObjectiveDisplay;
