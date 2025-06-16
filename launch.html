@@ -377,6 +377,33 @@
             0%, 100% { filter: brightness(1) hue-rotate(0deg); }
             50% { filter: brightness(0.8) hue-rotate(10deg); }
         }
+
+        #objective-display {
+            position: absolute;
+            top: 30px; /* Increased from 20px to avoid overlap with existing controls/performance div */
+            left: 50%;
+            transform: translateX(-50%);
+            min-width: 300px; /* Ensure it has some width */
+            max-width: 60%;
+            padding: 10px 15px;
+            background-color: rgba(0, 0, 0, 0.6); /* Semi-transparent black */
+            color: #f0f0f0; /* Light grey text */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 16px;
+            border-radius: 8px;
+            text-align: center;
+            z-index: 100; /* Ensure it's above game, below critical popups if any */
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            opacity: 0.9;
+            transition: opacity 0.5s ease-in-out; /* For potential fade effects later */
+        }
+
+        /* Style for when it's empty or should be hidden (can be controlled by JS) */
+        #objective-display:empty {
+            /* display: none; */ /* Or opacity: 0; pointer-events: none; */
+            /* For now, let JS handle initial text or hide it */
+        }
     </style>
 </head>
 <body>
@@ -452,6 +479,9 @@
             <button id="close-message-btn" style="position: absolute; top: 10px; right: 10px; padding: 5px 10px; cursor: pointer;">X</button>
         </div>
     </div>
+
+    <!-- Objective Display -->
+    <div id="objective-display">Current Objective Will Appear Here</div>
 
     <!-- ========================================|
          Enhanced JavaScript with Performance Monitoring

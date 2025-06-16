@@ -48,6 +48,48 @@ export class FPSControls {
     // Initialize UI elements
     this.initUIElements();
     this.isHiding = false;
+
+    // Noise properties
+    this.currentNoiseLevel = 0;
+    this.maxNoiseLevel = 100;
+    this.noiseDecayRate = 10; // Units per second for decay
+    this.noisePerSecondRunning = 15;
+    this.noisePerSecondWalking = 5;
+    this.noiseFromJump = 30;
+    this.noiseFromLanding = 20;
+    this.wasStanding = true; // To detect landing
+  }
+
+  generateNoise(amount) {
+    this.currentNoiseLevel = Math.min(this.maxNoiseLevel, this.currentNoiseLevel + amount);
+    // console.log("Noise generated, level:", this.currentNoiseLevel); // For debugging
+  }
+
+  reportNoiseEvent(type, amount) {
+    this.generateNoise(amount); // Generate noise points
+
+    switch (type) {
+        case 'nudge':
+            if (this.objectImpactSound && this.objectImpactSound.buffer) { // .buffer is a better check for loaded
+                if (this.objectImpactSound.isPlaying) {
+                    this.objectImpactSound.stop();
+                }
+                this.objectImpactSound.play();
+            }
+            break;
+        case 'jump':
+            // playJumpSound handles its own sound playing.
+            // The noise points (this.noiseFromJump) are now generated via this method.
+            this.playJumpSound();
+            break;
+        case 'land':
+            // No specific landing sound defined yet, so landing just generates noise points.
+            // If a landing sound were added (e.g., this.landSound), it would be played here.
+            break;
+        default:
+            // console.warn("Unknown noise event type:", type);
+            break;
+    }
   }
 
   initAudioSources() {
@@ -142,6 +184,9 @@ export class FPSControls {
     
     // Create breath meter
     this.createBreathMeter();
+
+    // Get noise meter bar
+    this.noiseMeterBar = document.getElementById('noise-meter-bar');
   }
 
   createStaminaBar() {
@@ -274,8 +319,8 @@ export class FPSControls {
           this.move.up = true;
         } else if (this.isStanding && !this.inWater) {
           this.velocity.y += 15; // Adjust jump height as needed
-          this.isStanding = false;
-          this.playJumpSound();
+          this.isStanding = false; // Player is now in air
+          this.reportNoiseEvent('jump', this.noiseFromJump); // New line
         }
         break;
       case 'ShiftLeft': // Move down in Edit Mode
@@ -306,7 +351,19 @@ export class FPSControls {
     const position = this.pointerLockControls.object.position;
 
     // Update movement tracking
-    this.updateMovementTracking(delta);
+    this.updateMovementTracking(delta); // Sets this.movementState
+
+    // Noise decay
+    if (this.currentNoiseLevel > 0) {
+        this.currentNoiseLevel = Math.max(0, this.currentNoiseLevel - this.noiseDecayRate * delta);
+    }
+
+    // Noise from movement
+    if (this.movementState === 'running') {
+        this.generateNoise(this.noisePerSecondRunning * delta);
+    } else if (this.movementState === 'walking') {
+        this.generateNoise(this.noisePerSecondWalking * delta);
+    }
     
     // Check for game completion
     if (this.isNearTarget(position, targetPosition, tolerance)) {
@@ -446,16 +503,24 @@ export class FPSControls {
     // Apply movement
     const position = this.pointerLockControls.object.position;
     
-    if (this.isEditMode) {
-      this.velocity.y = 0; // Disable gravity effect
+    if (this.isEditMode) { // Edit mode movement
+      // this.velocity.y = 0; // Disable gravity effect - this was commented out from original, ensure it's desired
+      position.addScaledVector(this.velocity, delta); // Apply velocity directly
+      this.isStanding = false; // Not relevant in edit mode / flying
+    } else { // Not in edit mode
       position.addScaledVector(this.velocity, delta);
-    } else {
-      position.addScaledVector(this.velocity, delta);
-      if (position.y < 5) {
+      if (position.y < 5) { // Assuming 5 is ground level or player height reference
         this.velocity.y = 0;
         position.y = 5;
+        if (!this.wasStanding) { // Check if they *were* in the air (use wasStanding)
+            this.reportNoiseEvent('land', this.noiseFromLanding); // New line
+            // console.log("Landed, noise:", this.currentNoiseLevel); // For debugging
+        }
         this.isStanding = true;
+      } else {
+        this.isStanding = false; // Player is in the air if not on ground
       }
+      this.wasStanding = this.isStanding; // Update wasStanding for next frame's check
     }
 
     // Enhanced head bobbing
@@ -546,6 +611,21 @@ export class FPSControls {
         breathBar.style.background = 'linear-gradient(90deg, #74b9ff, #0984e3)';
       }
     }
+
+    // Update noise meter
+    if (this.noiseMeterBar) {
+        const noisePercent = (this.currentNoiseLevel / this.maxNoiseLevel) * 100;
+        this.noiseMeterBar.style.height = noisePercent + '%';
+
+        // Change color based on noise level
+        if (noisePercent > 75) {
+            this.noiseMeterBar.style.backgroundColor = '#f44336'; // Red
+        } else if (noisePercent > 40) {
+            this.noiseMeterBar.style.backgroundColor = '#ffeb3b'; // Yellow
+        } else {
+            this.noiseMeterBar.style.backgroundColor = '#4CAF50'; // Green
+        }
+    }
   }
 
   updateTargetMarker() {
@@ -597,7 +677,13 @@ export class FPSControls {
   }
 
   gameFinished() {
-    if (window.gameState) window.gameState.currentState = 'victory';
+    if (window.gameState) {
+        window.gameState.currentState = 'victory';
+        window.gameState.currentObjectiveKey = 'VICTORY';
+        if (typeof window.updateObjectiveDisplay === 'function') {
+            window.updateObjectiveDisplay();
+        }
+    }
     // Create a black screen that will fade in
     const whiteScreen = document.createElement('div');
     whiteScreen.style.position = 'absolute';

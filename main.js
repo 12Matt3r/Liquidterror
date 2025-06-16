@@ -21,6 +21,15 @@ const messages = [
 ];
 let messageBottles = []; // To store bottle meshes for animation
 
+const OBJECTIVES = {
+    INIT: "Find a way to escape the building.",
+    KEY_NEEDED: "A key is needed to unlock the exit.",
+    KEY_COLLECTED: "Key acquired! Find the door it unlocks.",
+    DOOR_UNLOCKED: "Door unlocked! Reach the final exit point.",
+    GAME_OVER: "You were overcome by the flood...",
+    VICTORY: "You have escaped!"
+};
+
 //================================================================
 // Scene Setup - Ensure Basic Functionality First
 //================================================================
@@ -330,6 +339,7 @@ class GameStateManager {
         this.floodLevel = 0;
         this.maxFloodLevel = 15;
         this.floodSpeed = 0.05; // Increased speed
+        this.currentObjectiveKey = 'INIT'; // Initialize here
         this.ambientIntensity = 1.0;
         this.lastHeartbeat = 0;
     }
@@ -347,6 +357,10 @@ class GameStateManager {
         this.playerHealth = Math.max(0, this.playerHealth - amount);
         if (this.playerHealth <= 0) {
             this.currentState = 'gameOver';
+            this.currentObjectiveKey = 'GAME_OVER';
+            if (typeof updateObjectiveDisplay === 'function') {
+                 updateObjectiveDisplay();
+            }
         }
         
         // Trigger heartbeat effect when health is low
@@ -399,6 +413,27 @@ class GameStateManager {
 }
 
 const gameState = new GameStateManager();
+
+//================================================================
+// Objective Display Logic
+//================================================================
+function updateObjectiveDisplay() {
+    const objectiveDisplayElement = document.getElementById('objective-display');
+    if (objectiveDisplayElement && gameState && gameState.currentObjectiveKey) {
+        const objectiveText = OBJECTIVES[gameState.currentObjectiveKey];
+        if (objectiveText) {
+            objectiveDisplayElement.textContent = objectiveText;
+            objectiveDisplayElement.style.opacity = '0.9'; // Ensure visible
+        } else {
+            // console.warn("Unknown objective key:", gameState.currentObjectiveKey);
+            objectiveDisplayElement.textContent = ''; // Clear if key is unknown
+            objectiveDisplayElement.style.opacity = '0'; // Hide if no text
+        }
+    } else if (objectiveDisplayElement) {
+        objectiveDisplayElement.textContent = ''; // Clear if no key
+        objectiveDisplayElement.style.opacity = '0'; // Hide if no text
+    }
+}
 
 //================================================================
 // Basic Particle System
@@ -854,9 +889,9 @@ class BasicInteractionSystem {
 
         object.userData.lastNudgeSign = -nudgeDirection;
 
-        // Play sound
-        if (controls && typeof controls.playObjectImpactSound === 'function') {
-            controls.playObjectImpactSound();
+        // Report noise event (generates noise points and plays sound via FPSControls)
+        if (controls && typeof controls.reportNoiseEvent === 'function') {
+            controls.reportNoiseEvent('nudge', 20); // Example noise amount for nudge: 20
         }
 
         // console.log(`Nudged ${object.userData.type}`);
@@ -868,6 +903,8 @@ class BasicInteractionSystem {
         keyObj.visible = false;
         
         this.gameState.collectKey();
+        this.gameState.currentObjectiveKey = 'KEY_COLLECTED';
+        updateObjectiveDisplay();
         
         const keyContainer = document.getElementById('key-image-container');
         if (keyContainer) {
@@ -884,6 +921,8 @@ class BasicInteractionSystem {
                 doorObj.userData.locked = false;
                 this.animateDoorOpen(doorObj);
                 this.gameState.objectives.doorUnlocked = true;
+                this.gameState.currentObjectiveKey = 'DOOR_UNLOCKED';
+                updateObjectiveDisplay();
             }
         }
         // Removed the else block that previously handled victory condition
@@ -929,8 +968,14 @@ function updateUI() {
         } else {
             document.body.style.borderBottom = 'none';
         }
+
+        // Call FPSControls specific UI updates
+        if (controls && typeof controls.updateUI === 'function') {
+            controls.updateUI(); // Pass delta if controls.updateUI needs it
+        }
+
     } catch (error) {
-        console.warn('Error updating UI:', error);
+        console.warn('Error updating main UI:', error); // Renamed from 'Error updating UI'
     }
 }
 
@@ -1258,6 +1303,7 @@ function animate() {
 //================================================================
 // Start the basic game immediately
 console.log('Initializing basic game...');
+updateObjectiveDisplay(); // Initial display based on gameState.currentObjectiveKey
 initWater(); // Call the function to create the water
 initHidingSpots(); // Call to initialize hiding spots
 initMessageBottles(); // Call to initialize message bottles
@@ -1294,3 +1340,6 @@ gameStyles.textContent = `
 document.head.appendChild(gameStyles);
 
 console.log('Game initialized successfully');
+
+// Expose updateObjectiveDisplay globally if not already module-scoped in a way FPSControls can access
+window.updateObjectiveDisplay = updateObjectiveDisplay;
