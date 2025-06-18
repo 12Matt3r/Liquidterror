@@ -811,16 +811,35 @@ class BasicInteractionSystem {
         const playerPosition = this.camera.position;
         let nearestInteractable = null;
         let nearestDistance = Infinity;
+        const interactionFocusDistance = 5; // Define focus distance
 
         this.interactables.forEach(obj => {
-            // Updated condition to check both 'interactable' and 'isInteractable'
-            if (obj.userData.interactable === false || obj.userData.isInteractable === false) return;
-            // If neither is explicitly false, and at least one is true (or just exists for backward compatibility)
-            if (!obj.userData.interactable && !obj.userData.isInteractable) return;
+            let isCurrentlyActiveInteractable = false;
 
+            // Determine if the object is currently interactable based on its type and state
+            if (obj.userData.type === 'key' && obj.userData.collected === false) { // Check explicitly for not collected
+                isCurrentlyActiveInteractable = true;
+            } else if (obj.userData.type === 'door') {
+                isCurrentlyActiveInteractable = true; // Door prompts change based on state, but it's always focusable
+            } else if (obj.userData.type === 'messageBottle') {
+                // Message bottles are interactable if their 'isInteractable' flag is not explicitly false.
+                // (They are initialized with isInteractable: true)
+                if (obj.userData.isInteractable !== false) {
+                    isCurrentlyActiveInteractable = true;
+                }
+            } else if (obj.userData.isNudgable) {
+                // Nudgable items are considered interactable.
+                isCurrentlyActiveInteractable = true;
+            }
+            // Add checks for other future interactable types here.
+
+            if (!isCurrentlyActiveInteractable) {
+                return; // Skip this object if it's not currently active or relevant for interaction focus.
+            }
 
             const distance = playerPosition.distanceTo(obj.position);
-            if (distance < 5 && distance < nearestDistance) {
+
+            if (distance < interactionFocusDistance && distance < nearestDistance) {
                 nearestDistance = distance;
                 nearestInteractable = obj;
             }
@@ -1183,6 +1202,8 @@ function animate() {
         const delta = clock.getDelta();
         const currentTime = Date.now(); // Get current time once per frame for flicker logic
 
+        gameState.updateFlood(delta); // MOVED TO HERE
+
         flickeringMaterials.forEach(item => {
             item.material.needsUpdate = false;
 
@@ -1246,7 +1267,7 @@ function animate() {
         testCube3.rotation.z += delta * 0.3;
         
         // Update game state
-        gameState.updateFlood(delta);
+        // gameState.updateFlood(delta); // REMOVED FROM HERE
         gameState.gameTime += delta;
         
         // Update systems with error handling
@@ -1288,8 +1309,9 @@ function animate() {
         }
         
         // Render the scene using the composer
-        // renderer.render(scene, camera); // Old line
-        composer.render(); // New line for post-processing
+        // console.log("FPSControls state:", controls); // Optional: for deeper debugging
+        console.log("Attempting to render frame. Time:", clock.getElapsedTime()); // ADD THIS LINE
+        composer.render();
         
     } catch (error) {
         console.error('Error in animation loop:', error);

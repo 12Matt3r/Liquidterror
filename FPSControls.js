@@ -189,6 +189,43 @@ export class FPSControls {
     this.noiseMeterBar = document.getElementById('noise-meter-bar');
   }
 
+  updateUI() { // This method was already present, adding noise meter logic to it
+    // Update stamina bar
+    const staminaBar = document.getElementById('stamina-bar');
+    if (staminaBar) {
+      const stamina = this.isRunning ? 70 : 100; // Simplified stamina
+      staminaBar.style.width = stamina + '%';
+    }
+
+    // Update breath meter
+    const breathBar = document.getElementById('breath-bar');
+    if (breathBar && this.inWater) {
+      const breathPercentage = Math.max(0, 100 - (this.breathingTimer / 30) * 100);
+      breathBar.style.width = breathPercentage + '%';
+
+      if (breathPercentage < 30) {
+        breathBar.style.background = 'linear-gradient(90deg, #ff4757, #ff3742)';
+      } else {
+        breathBar.style.background = 'linear-gradient(90deg, #74b9ff, #0984e3)';
+      }
+    }
+
+    // Update noise meter
+    if (this.noiseMeterBar) {
+        const noisePercent = (this.currentNoiseLevel / this.maxNoiseLevel) * 100;
+        this.noiseMeterBar.style.height = noisePercent + '%';
+
+        // Change color based on noise level
+        if (noisePercent > 75) {
+            this.noiseMeterBar.style.backgroundColor = '#f44336'; // Red
+        } else if (noisePercent > 40) {
+            this.noiseMeterBar.style.backgroundColor = '#ffeb3b'; // Yellow
+        } else {
+            this.noiseMeterBar.style.backgroundColor = '#4CAF50'; // Green
+        }
+    }
+  }
+
   createStaminaBar() {
     const staminaContainer = document.createElement('div');
     staminaContainer.id = 'stamina-container';
@@ -591,43 +628,7 @@ export class FPSControls {
     }
   }
 
-  updateUI() {
-    // Update stamina bar
-    const staminaBar = document.getElementById('stamina-bar');
-    if (staminaBar) {
-      const stamina = this.isRunning ? 70 : 100; // Simplified stamina
-      staminaBar.style.width = stamina + '%';
-    }
-    
-    // Update breath meter
-    const breathBar = document.getElementById('breath-bar');
-    if (breathBar && this.inWater) {
-      const breathPercentage = Math.max(0, 100 - (this.breathingTimer / 30) * 100);
-      breathBar.style.width = breathPercentage + '%';
-      
-      if (breathPercentage < 30) {
-        breathBar.style.background = 'linear-gradient(90deg, #ff4757, #ff3742)';
-      } else {
-        breathBar.style.background = 'linear-gradient(90deg, #74b9ff, #0984e3)';
-      }
-    }
-
-    // Update noise meter
-    if (this.noiseMeterBar) {
-        const noisePercent = (this.currentNoiseLevel / this.maxNoiseLevel) * 100;
-        this.noiseMeterBar.style.height = noisePercent + '%';
-
-        // Change color based on noise level
-        if (noisePercent > 75) {
-            this.noiseMeterBar.style.backgroundColor = '#f44336'; // Red
-        } else if (noisePercent > 40) {
-            this.noiseMeterBar.style.backgroundColor = '#ffeb3b'; // Yellow
-        } else {
-            this.noiseMeterBar.style.backgroundColor = '#4CAF50'; // Green
-        }
-    }
-  }
-
+  // Restored updateTargetMarker
   updateTargetMarker() {
     if (this.targetMarker) {
       this.targetMarker.userData.pulsePhase += 0.05;
